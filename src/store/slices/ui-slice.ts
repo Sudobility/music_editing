@@ -12,7 +12,18 @@ import type { DurationName, UUID } from '@sudobility/music_types';
 import type { EditingState, SliceArgs } from '../editing-store.js';
 import { getMusicSelectionSource } from '../../services/selection/singleton.js';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
+/**
+ * The colour scheme a reader asked for.
+ *
+ * An array with the type read off it, not a bare union: a union has no runtime
+ * form, so the settings picker in each app would have to write the list out
+ * again — which is how one of them comes to offer a mode nothing applies.
+ * `system` means "follow the OS", and is the default because a device that has
+ * been told to go dark at sunset should take the app with it.
+ */
+export const THEME_MODES = ['light', 'dark', 'system'] as const;
+
+export type ThemeMode = (typeof THEME_MODES)[number];
 
 /** Whether notation shows what the score sounds, or what each player reads. */
 export type PitchDisplay = 'concert' | 'written';

@@ -21,9 +21,17 @@ import { globSync, readFileSync } from 'node:fs';
 const WEB_ONLY =
   /\b(document|window|localStorage|sessionStorage|XMLHttpRequest|HTMLElement|HTMLCanvasElement|CanvasRenderingContext2D|requestAnimationFrame|IntersectionObserver|ResizeObserver|Worker)\b/;
 
-/** Packages this may depend on. Anything else is a platform assumption. */
+/**
+ * Packages this may depend on. Anything else is a platform assumption.
+ *
+ * `react` is on the list and `react-dom` deliberately is not: React itself is
+ * the same library on both platforms — it is the *renderer* that differs — so
+ * a hook that owns an editing rule and renders nothing runs unchanged in both.
+ * Anything that reaches for a DOM renderer is still rejected here.
+ */
 const ALLOWED_PACKAGES = new Set([
   '@sudobility/music_types',
+  'react',
   '@sudobility/music_types/test',
   'zustand',
   'zustand/middleware/immer',

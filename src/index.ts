@@ -22,7 +22,15 @@ export * from './store/slices/ui-slice.js';
 export * from './services/editing/editing.js';
 export * from './services/editing/shortcuts.js';
 export * from './services/editing/copy.js';
+export * from './services/editing/view-settings.js';
+export * from './services/editing/use-clipboard-prompts.js';
 export * from './services/selection/music-selection.js';
 export * from './services/selection/singleton.js';
 export * from './domain/notation/note-entry.js';
 export * from './domain/notation/pitch-drag.js';
+
+/** The shortcut list a reader is shown, checked against the bindings. */
+export * from './services/editing/shortcut-table.js';
+
+/** The documentation's structure and copy keys, shared by both apps. */
+export * from './services/docs/docs-content.js';
