@@ -25,8 +25,15 @@ export const THEME_MODES = ['light', 'dark', 'system'] as const;
 
 export type ThemeMode = (typeof THEME_MODES)[number];
 
-/** Whether notation shows what the score sounds, or what each player reads. */
-export type PitchDisplay = 'concert' | 'written';
+/*
+  Declared in music_types, beside `displayScore` — the lens that consumes it —
+  and re-exported here so every existing `PitchDisplay` import off this package
+  still resolves. Two declarations is what it was: music_lib `export *`s from
+  both packages, and TypeScript refuses the ambiguity (TS2308) the moment the
+  same name arrives from two different modules.
+*/
+import type { PitchDisplay } from '@sudobility/music_types';
+export type { PitchDisplay };
 
 export type DevSettings = {
   showIds: boolean;
