@@ -25,6 +25,17 @@ line tying all 80 operations to one store.
 - `bun run verify` — format check, typecheck, lint, test, build (run before any push)
 - `bun run test` / `bun run test:watch` — vitest
 
+- **Shared app *content* lives here, not in an app** — `docs-content.ts`, the
+  shortcut list, `resource-links.ts` and `formats.ts`. Two apps render this
+  documentation now, and the test is not "is it music theory" but "would a
+  second copy go stale": the forty-two resource links say which importer each
+  source feeds, and what this product can open is a fact about the product
+  rather than about a web page. Structure and keys only — every description is
+  an i18n key, so the prose stays in each host's locale files and this package
+  holds no strings in any language. The one part that cannot come along is
+  anything a bundler resolves: the vendored site icons stay in the web app,
+  read through its own Vite glob.
+
 ## Gotchas
 
 - **A slice is generic over the state it is composed INTO.** `SliceArgs<T extends EditingState>` carries a setter, a getter and a `changed` callback — deliberately narrower than zustand's `StateCreator`, whose mutator tuple `[['zustand/immer', never]]` cannot be made generic because it has to name a concrete state. The slices take the three things they actually use, and stay composable into both the web app's wider store and a bare per-document one.

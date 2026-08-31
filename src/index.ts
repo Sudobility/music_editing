@@ -34,3 +34,5 @@ export * from './services/editing/shortcut-table.js';
 
 /** The documentation's structure and copy keys, shared by both apps. */
 export * from './services/docs/docs-content.js';
+export * from './services/docs/resource-links.js';
+export * from './services/docs/formats.js';
