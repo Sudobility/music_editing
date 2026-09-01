@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { testEditingStore } from '../test/store.js';
 import {
   selectActiveTrackId,
-  measureBeatAt,
   selectSelectedMeasureRange,
   selectSelectedMeasures,
   selectSelectedNoteCount,
@@ -68,37 +67,15 @@ describe('selectors', () => {
     });
   });
 
-  describe('measureBeatAt', () => {
-    // A pure reading of (score, tick) rather than a store selector: the
-    // position is one shared value held outside the store, so there is no
-    // state pair to memoize on and nothing to keep in step.
-    it('is null with no score', () => {
-      expect(measureBeatAt(null, 0)).toBeNull();
-    });
+  /*
+    `measureBeatAt` is gone; `barBeatForTick` in music_types is the one
+    implementation, and it is tested there.
 
-    it('reports 1-based measure/beat at tick 0', () => {
-      expect(measureBeatAt(twinkleScore(), 0)).toEqual({
-        measureIndex: 1,
-        beat: 1,
-      });
-    });
-
-    it('reports the correct measure/beat partway through the score (480 ppq, 4/4 => 480 ticks/beat, 1920/measure)', () => {
-      expect(measureBeatAt(twinkleScore(), 1920 + 480 * 2)).toEqual({
-        measureIndex: 2,
-        beat: 3,
-      });
-    });
-
-    it('clamps to the last measure when the tick is past the end of the score', () => {
-      const score = twinkleScore();
-      const lastMeasure =
-        score.tracks[0].measures[score.tracks[0].measures.length - 1];
-      expect(measureBeatAt(score, 1_000_000)!.measureIndex).toBe(
-        lastMeasure.index + 1
-      );
-    });
-  });
+    The two disagreed: this one numbered bars `measure.index + 1`, which counts
+    a pickup, so on a score with an anacrusis the web transport read a
+    different bar from the inspector and from "go to bar N". `barNumberAt`
+    exists to keep `index + 1` from being written down anywhere.
+  */
 
   describe('memoization (finding 3)', () => {
     it('selectSelectedNotes returns the same array reference across repeated calls with unchanged inputs, and a new one once the selection changes', () => {
@@ -137,15 +114,12 @@ describe('selectors', () => {
       expect(third).not.toBe(first);
     });
 
-    it('measureBeatAt reads the tick it is handed, so nothing has to be kept in step', () => {
-      // This used to assert reference stability, because the reading was a
-      // memoized selector over a store field and anything reading it high in
-      // the tree re-rendered on every store change. It is not in the store at
-      // all now: the one readout that wants it subscribes to the position.
-      const score = twinkleScore();
-      expect(measureBeatAt(score, 480)).toEqual({ measureIndex: 1, beat: 2 });
-      expect(measureBeatAt(score, 960)).toEqual({ measureIndex: 1, beat: 3 });
-    });
+    /*
+      The `measureBeatAt` case that lived here is gone with the function: the
+      one implementation is `barBeatForTick` in music_types, tested there. It
+      took a tick as an argument rather than reading one off the state, which
+      is the property this block is about, and it still does.
+    */
   });
 });
 

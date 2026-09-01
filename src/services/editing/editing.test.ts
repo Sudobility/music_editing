@@ -14,62 +14,63 @@ import {
 } from '@sudobility/music_types';
 import type { NoteEvent } from '@sudobility/music_types';
 import {
+  addBlankTrack,
+  canStackOnActiveTrack,
+  caretToBarEdge,
+  caretToScoreEdge,
   changeAccidental,
   changeArticulation,
   changeDuration,
+  changeOrnament,
   changeVelocity,
-  addBlankTrack,
+  chooseDuration,
+  chooseEditMode,
+  collisionForEditMode,
+  cutWouldPrompt,
   defaultInsertPitch,
   deleteSelected,
+  displayedPitchForNote,
   duplicateSelected,
+  exportScopeNeedsPrompt,
+  exportTargetScore,
   findAdjacentEventId,
   insertChordAtCaret,
   insertNoteAtCaret,
   insertRestAtSelection,
+  lyricTextAt,
+  moveNoteToTick,
   moveSelectionHorizontal,
+  pasteWouldPrompt,
+  placeCaret,
+  prepareReplacement,
   quantizeSelection,
+  resizeNotes,
   resolveInsertTarget,
   selectAll,
-  selectedNoteIds,
   selectMeasure,
+  selectMeasureRange,
+  selectNotes,
+  selectRegeneratedInRange,
+  selectToTick,
   selectTrackAction,
-  changeOrnament,
+  selectedNoteIds,
+  setBarline,
+  setChordSymbol,
+  setDynamic,
+  setKeySignature,
+  setNotePitch,
+  setPickup,
+  setTempoAt,
+  setTimeSignature,
+  stepCaret,
   toggleArpeggiate,
   toggleFermata,
   toggleHairpin,
   toggleTie,
-  stepCaret,
-  caretToBarEdge,
-  caretToScoreEdge,
-  placeCaret,
-  writeNoteAtPoint,
-  selectToTick,
-  selectMeasureRange,
-  chooseDuration,
-  chooseEditMode,
-  canStackOnActiveTrack,
-  writeLyric,
-  lyricTextAt,
-  setChordSymbol,
-  setTempoAt,
-  setPickup,
-  setBarline,
-  displayedPitchForNote,
-  setNotePitch,
-  moveNoteToTick,
-  setDynamic,
-  resizeNotes,
-  setTimeSignature,
-  setKeySignature,
-  selectRegeneratedInRange,
-  collisionForEditMode,
-  prepareReplacement,
-  exportScopeNeedsPrompt,
-  exportTargetScore,
-  cutWouldPrompt,
-  pasteWouldPrompt,
   transposeOctave,
   transposeSemitone,
+  writeLyric,
+  writeNoteAtPoint,
 } from './editing.js';
 import { transformCommand } from '@sudobility/music_types';
 import type { QuantizeOptions } from '@sudobility/music_types';
@@ -137,6 +138,7 @@ describe('insertNoteAtCaret', () => {
   });
 
   it('is a no-op with no score loaded', () => {
+    // Deliberately unseeded: the point is that there is no score.
     const store = testEditingStore();
     expect(() =>
       insertNoteAtCaret(store, { step: 'C', accidental: 0, octave: 4 })
@@ -494,7 +496,7 @@ describe('quantizeSelection', () => {
   });
 
   it('quantizes a 2400-note selection correctly — the size that used to be routed through a worker', async () => {
-    const store = testEditingStore();
+    const store = makeStore();
     // 1 track x 600 measures x 4 notes/measure = 2400 notes, spread across 600
     // per-measure voices (stressScore's convention). This was the case that
     // crossed the old >2000-event worker threshold; the worker is gone (the
@@ -1430,5 +1432,46 @@ describe('clipboard prompts', () => {
 
     expect(cutWouldPrompt(store)).toBe(false);
     expect(pasteWouldPrompt(store)).toBe(false);
+  });
+});
+
+describe('selectNotes', () => {
+  /*
+    Tapping or clicking a note. Shared because both apps do it, and because the
+    React Native app could not do it at all before: a tap there resolved only
+    to a *measure*, since its renderer was rebuilt every frame and the bounding
+    boxes went with it.
+  */
+  it('selects the chord, activates its track and aims the caret at it', () => {
+    const store = makeStore();
+    const score = store.getState().score!;
+    const note = allNotes(score)[0]!;
+
+    selectNotes(store, [note.id]);
+
+    expect(store.getState().selection.eventIds).toEqual([note.id]);
+    expect(store.getState().activeTrackId).toBe(note.trackId);
+    expect(getMusicPositionSource().reportedTick).toBe(note.startTick);
+  });
+
+  it('keeps every id it was given, because a chord is one bounding box', () => {
+    // "Which note of the chord did you point at" is not a question the
+    // geometry can answer, so the caller hands over all of them.
+    const store = makeStore();
+    const score = store.getState().score!;
+    const notes = allNotes(score)
+      .slice(0, 2)
+      .map(note => note.id);
+
+    selectNotes(store, notes);
+
+    expect(store.getState().selection.eventIds).toEqual(notes);
+  });
+
+  it('does nothing at all when handed no ids', () => {
+    const store = makeStore();
+    const before = store.getState().selection;
+    selectNotes(store, []);
+    expect(store.getState().selection).toBe(before);
   });
 });

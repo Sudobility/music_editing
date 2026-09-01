@@ -18,12 +18,10 @@
  * re-render every time.
  */
 import { findEvent, findTrack } from '@sudobility/music_types';
-import type { Score } from '@sudobility/music_types';
 import { selectionToRange } from '@sudobility/music_types';
 import type { ScoreRange } from '@sudobility/music_types';
 import type { Measure, NoteEvent, Track } from '@sudobility/music_types';
 import { isNoteEvent } from '@sudobility/music_types';
-import { beatDurationTicks } from '@sudobility/music_types';
 import type { EditingState } from './editing-store.js';
 
 /**
@@ -87,33 +85,23 @@ export const selectSelectedMeasureRange = memoize2(
   }
 );
 
-export type MeasureBeat = { measureIndex: number; beat: number };
-
 /**
- * The 1-based measure index and 1-based beat that `state.caretTick`
- * falls in (spec §10/§22, playback cursor), read off the score's first
- * track (every track shares the same measure grid once
- * `rebuildMeasureTicks` has run — see `domain/score/factory.ts`).
- * `null` if there's no score, or the score has no measures. Memoized on
- * (`score`, `caretTick`) reference/value identity.
+ * The bar and beat a tick falls in.
+ *
+ * A re-export of `barBeatForTick`, which is where this now lives. There used
+ * to be a second implementation here — `measureBeatAt` — and the two
+ * **disagreed**: this one numbered bars `measure.index + 1`, while
+ * `barBeatForTick` goes through `barNumberAt`.
+ *
+ * That difference is a bug, not a detail. A pickup bar is not counted, so
+ * every bar after one is a bar lower than its position: on a score with an
+ * anacrusis the web transport read one number and the React Native transport,
+ * the inspector and "go to bar 33" read another. `barNumberAt` exists exactly
+ * to stop `index + 1` being written down anywhere, and this was the one place
+ * still doing it.
  */
-export function measureBeatAt(
-  score: Score | null,
-  tick: number
-): MeasureBeat | null {
-  if (!score) return null;
-  const track = score.tracks[0];
-  if (!track || track.measures.length === 0) return null;
-
-  const measure =
-    track.measures.find(
-      m => tick >= m.startTick && tick < m.startTick + m.durationTicks
-    ) ?? track.measures[track.measures.length - 1];
-
-  const beatTicks = beatDurationTicks(measure.timeSignature, score.ppq);
-  const beat = Math.floor((tick - measure.startTick) / beatTicks) + 1;
-  return { measureIndex: measure.index + 1, beat };
-}
+export { barBeatForTick } from '@sudobility/music_types';
+export type { BarBeat } from '@sudobility/music_types';
 
 /**
  * The tracks to draw, in score order.

@@ -1205,6 +1205,45 @@ export function placeCaret<T extends EditingState>(
 }
 
 /**
+ * A note was clicked or tapped: select it, and aim the caret at it.
+ *
+ * The whole chord rather than one member, because every note of a chord shares
+ * one bounding box and "which one did you point at" is not a question the
+ * geometry can answer — adding and removing individual notes is the piano
+ * keyboard's job.
+ *
+ * Three writes as one action: the selection, the active track (the note's own,
+ * since acting on a note should act on its part) and the caret. A caller doing
+ * these separately can get two of the three right, which is the kind of bug
+ * that only shows up in the fourth interaction after it.
+ *
+ * Shared because both apps do this. The React Native app could not do it at
+ * all until its renderer was kept across frames — a tap there resolved only to
+ * a measure — and writing it a second time there would have been a second set
+ * of rules about what tapping a note means.
+ */
+export function selectNotes<T extends EditingState>(
+  store: EditorStoreApi<T>,
+  eventIds: readonly string[]
+): void {
+  const state = store.getState();
+  const score = state.score;
+  if (!score || eventIds.length === 0) return;
+
+  state.setSelection({
+    eventIds: [...eventIds],
+    measureIds: [],
+    trackIds: [],
+  });
+
+  const first = eventIds[0];
+  const note = first ? findEvent(score, first) : undefined;
+  if (!note) return;
+  state.setActiveTrack(note.trackId);
+  getMusicPositionSource().moveTo(Math.max(0, note.startTick));
+}
+
+/**
  * A click landed on a stave while note input is on: write the note there.
  *
  * The pitch is the *sounding* one; inverting the display lenses is the caller's
