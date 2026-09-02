@@ -46,6 +46,20 @@ export type DevSettings = {
   enableDiagnostics: boolean;
   /** Spec §33: "enable validation warnings" (warning-severity issues, in addition to errors). */
   enableValidationWarnings: boolean;
+  /**
+   * Which generation backend new scores are asked from.
+   *
+   * A developer setting rather than a Generate-dialog control on purpose: the
+   * answer is the same for every generation until somebody is deliberately
+   * comparing two of them, and putting it in the ordinary flow would ask every
+   * user a question they have no basis to answer.
+   *
+   * Typed as a plain string rather than `GenerationVariant` so a value stored
+   * by a newer build cannot break an older one — the server resolves it through
+   * an allow-list and falls back to the default, so an unrecognised value is
+   * harmless at both ends.
+   */
+  generationVariant: string;
 };
 
 export type ToastSeverity = 'info' | 'success' | 'warning' | 'error';
@@ -67,6 +81,7 @@ const DEFAULT_DEV_SETTINGS: DevSettings = {
   showPlaybackScheduling: false,
   enableDiagnostics: false,
   enableValidationWarnings: true,
+  generationVariant: 'default',
 };
 
 /**
