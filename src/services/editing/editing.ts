@@ -37,7 +37,11 @@ import type {
   Score,
   UUID,
 } from '@sudobility/music_types';
-import { createId, isNoteEvent } from '@sudobility/music_types';
+import {
+  createId,
+  isNoteEvent,
+  withGenerationVariant,
+} from '@sudobility/music_types';
 import type { MusicalEvent } from '@sudobility/music_types';
 import type { ScoreSelection } from '@sudobility/music_types';
 import type { ScoreCommand } from '@sudobility/music_types';
@@ -161,6 +165,12 @@ import {
   transposeCommand,
 } from '@sudobility/music_types';
 import type { QuantizeOptions } from '@sudobility/music_types';
+import { selectionKind } from './selection-kind.js';
+import {
+  clearMeasuresCommand,
+  clearTrackCommand,
+  deleteTrackCommand,
+} from '@sudobility/music_types';
 
 /** The store shape every function in this module operates on: same type `useAppStore`/`createAppStore()` produce. */
 /**
@@ -710,14 +720,113 @@ export function deleteSelected<T extends EditingState>(
   store: EditorStoreApi<T>
 ): void {
   const state = store.getState();
-  if (!state.score) return;
-  const ids = selectedNoteIds(state.score, state.selection);
+  const score = state.score;
+  if (!score) return;
+  const kind = selectionKind(state.selection);
+
+  if (kind === 'measures') {
+    const indices = selectedMeasureIndices(score, state.selection);
+    if (indices.length === 0) return;
+    // Descending, so removing one cannot move the next one's index.
+    for (const index of [...indices].reverse())
+      dispatchTracked(
+        store,
+        deleteMeasureCommand(index, commandLabel('deleteMeasure'))
+      );
+    state.clearSelection();
+    return;
+  }
+
+  if (kind === 'track') {
+    const trackId = state.selection.trackIds[0];
+    // The store refuses the last track anyway; asking first is what keeps the
+    // menu from offering a control that silently does nothing.
+    if (!trackId || !state.canDeleteTrack()) return;
+    dispatchTracked(
+      store,
+      deleteTrackCommand(trackId, commandLabel('deleteTrack'))
+    );
+    state.clearSelection();
+    return;
+  }
+
+  const ids = selectedNoteIds(score, state.selection);
   if (ids.length === 0) return;
   dispatchTracked(
     store,
     deleteEventsCommand(ids, commandLabel('deleteEvents'))
   );
   state.clearSelection();
+}
+
+/**
+ * Empties what is selected, keeping the thing that held it.
+ *
+ * The other half of Delete, and genuinely a different edit: a cleared bar keeps
+ * its number, its signatures and its repeats, and a cleared track keeps its
+ * instrument and its mix. Doing this by deleting and adding back loses every
+ * one of those and renumbers the score twice.
+ *
+ * Notes have no container to keep, so clearing them is deleting them *without*
+ * closing the gap — the time they occupied becomes rests and nothing after them
+ * moves, which is exactly what `deleteEventsCommand` alone does.
+ */
+export function clearSelected<T extends EditingState>(
+  store: EditorStoreApi<T>
+): void {
+  const state = store.getState();
+  const score = state.score;
+  if (!score) return;
+  const kind = selectionKind(state.selection);
+
+  if (kind === 'measures') {
+    if (state.selection.measureIds.length === 0) return;
+    dispatchTracked(
+      store,
+      clearMeasuresCommand(
+        state.selection.measureIds,
+        commandLabel('clearBars')
+      )
+    );
+    return;
+  }
+
+  if (kind === 'track') {
+    const trackId = state.selection.trackIds[0];
+    if (!trackId) return;
+    dispatchTracked(
+      store,
+      clearTrackCommand(trackId, commandLabel('clearTrack'))
+    );
+    return;
+  }
+
+  const ids = selectedNoteIds(score, state.selection);
+  if (ids.length === 0) return;
+  dispatchTracked(
+    store,
+    deleteEventsCommand(ids, commandLabel('deleteEvents'))
+  );
+  state.clearSelection();
+}
+
+/**
+ * The bar indices a measure selection covers.
+ *
+ * By index rather than by id, because a measure id belongs to one track and a
+ * bar is the same bar on every stave — two tracks' ids for bar 3 are one
+ * selection of bar 3.
+ */
+function selectedMeasureIndices(
+  score: Score,
+  selection: { measureIds: readonly string[] }
+): number[] {
+  const wanted = new Set(selection.measureIds);
+  const indices = new Set<number>();
+  for (const track of score.tracks)
+    for (const measure of track.measures)
+      if (wanted.has(measure.id)) indices.add(measure.index);
+  return [...indices].sort((a, b) => a - b);
 }
 
 /** Appends one empty measure to every track, so the barlines stay aligned. */
@@ -1934,6 +2043,15 @@ export function selectRegeneratedInRange<T extends EditingState>(
 /** What the Replace dialog collects. The region it applies to is derived, not asked for. */
 export type ReplaceSubmission = {
   instruction: string;
+  /**
+   * Which generation backend writes the replacement.
+   *
+   * Collected here rather than read from a setting, for the same reason the
+   * Generate dialog asks: a replacement is the cheapest thing in the system to
+   * run twice and compare by ear, which is exactly when you want to change
+   * backends for one call without changing it for everything.
+   */
+  variant?: string;
   style?: string;
   mood?: string;
   complexity?: 'simple' | 'moderate' | 'complex';
@@ -2001,7 +2119,14 @@ export function prepareReplacement<T extends EditingState>(
         ? 'replace-measures'
         : 'replace-track';
 
-  return { kind, request, range: region.range };
+  return {
+    kind,
+    // Tagged after the fact rather than threaded through
+    // `prepareRegenerationRequestForRange`, whose options describe the *music*
+    // being asked for; which backend answers is not one of them.
+    request: withGenerationVariant(request, submission.variant),
+    range: region.range,
+  };
 }
 
 /**
@@ -2056,6 +2181,13 @@ export function cutWouldPrompt<T extends EditingState>(
   const state = store.getState();
   const score = state.score;
   if (!score) return false;
+  const kind = selectionKind(state.selection);
+  // A bar and a track always have both answers: Clear keeps the container and
+  // Delete removes it, and those are never the same score. Only notes have a
+  // case where they coincide — nothing follows the cut, so there is no gap to
+  // close — and that is the case `cutNeedsPrompt` knows.
+  if (kind === 'measures') return state.selection.measureIds.length > 0;
+  if (kind === 'track') return state.canDeleteTrack();
   const notes = state.selection.eventIds
     .map(id => findEvent(score, id))
     .filter(
@@ -2065,14 +2197,25 @@ export function cutWouldPrompt<T extends EditingState>(
   return cutNeedsPrompt(score, notes);
 }
 
-/** The same, for pasting: only when the target span already holds something. */
+/**
+ * The same, for pasting: only when insert and replace would differ.
+ *
+ * Per kind, because "would they differ" is a different question for each.
+ * Inserting bars lengthens the score and replacing them does not, so those
+ * always differ; so do inserting and replacing a track. Notes are the one case
+ * where the two can coincide — pasting into empty bars pushes nothing and
+ * overwrites nothing — and that is what `pasteNeedsPrompt` tests.
+ */
 export function pasteWouldPrompt<T extends EditingState>(
   store: EditorStoreApi<T>
 ): boolean {
   const state = store.getState();
   const score = state.score;
   const clipboard = state.clipboard;
-  if (!score || !clipboard || clipboard.events.length === 0) return false;
+  if (!score || !clipboard) return false;
+  if (selectionKind(state.selection) !== clipboard.kind) return false;
+  if (clipboard.kind === 'measures' || clipboard.kind === 'track') return true;
+  if (clipboard.events.length === 0) return false;
   const trackId = selectActiveTrackId(state);
   if (!trackId) return false;
   return pasteNeedsPrompt(

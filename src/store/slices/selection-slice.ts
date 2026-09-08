@@ -10,16 +10,51 @@ import { allNotes, findEvent } from '@sudobility/music_types';
 import { selectionToRange } from '@sudobility/music_types';
 import { emptySelection } from '@sudobility/music_types';
 import type { ScoreSelection } from '@sudobility/music_types';
-import type { NoteEvent, Score, UUID } from '@sudobility/music_types';
+import type {
+  MeasureSlice,
+  NoteEvent,
+  Score,
+  Track,
+  UUID,
+} from '@sudobility/music_types';
 import { isNoteEvent } from '@sudobility/music_types';
 import { pasteEventsCommand } from '@sudobility/music_types';
 import { deleteEventsCommand } from '@sudobility/music_types';
+import {
+  clearMeasuresCommand,
+  clearTrackCommand,
+  deleteMeasureCommand,
+  deleteTrackCommand,
+  insertMeasuresCommand,
+  insertTrackCommand,
+  replaceMeasuresCommand,
+  replaceTrackCommand,
+} from '@sudobility/music_types';
+import { commandLabel } from '../../services/editing/copy.js';
+import { selectionKind } from '../../services/editing/selection-kind.js';
 import { closeGap, makeRoom } from '@sudobility/music_types';
 import { transformCommand } from '@sudobility/music_types';
 import type { EditingState, SliceArgs } from '../editing-store.js';
 import { getMusicSelectionSource } from '../../services/selection/singleton.js';
 
-export type ClipboardData = { events: NoteEvent[]; anchorTick: number };
+/**
+ * What was copied, tagged with what kind of thing it is.
+ *
+ * A union rather than three fields, because the clipboard holds exactly one
+ * thing and Paste is only offered when its kind matches the selection's — see
+ * `canPasteInto`. It was a bare `{events, anchorTick}` while notes were the only
+ * thing that could be copied at all.
+ *
+ * A **measures** entry is a vertical slice: the bars at those indices across
+ * every track, not one part's. That is what the score model already means by a
+ * bar — `deleteMeasureCommand` removes one from every track — and it is what
+ * lets insert and replace put a slice back without leaving the parts
+ * disagreeing about where bar 40 is.
+ */
+export type ClipboardData =
+  | { kind: 'notes'; events: NoteEvent[]; anchorTick: number }
+  | { kind: 'measures'; slice: MeasureSlice; count: number }
+  | { kind: 'track'; track: Track };
 
 export type SelectionSlice = {
   selection: ScoreSelection;
@@ -82,6 +117,75 @@ export type SelectionSlice = {
     options?: { scope?: 'replace' | 'insert' | 'stack' }
   ) => void;
 };
+
+/**
+ * The bar indices a measure selection covers, in order.
+ *
+ * By *index*, not by id: a measure id belongs to one track, and a bar is the
+ * same bar on every stave. Two tracks' ids for bar 3 are one selection of bar 3.
+ */
+function selectedMeasureIndices(
+  score: Score,
+  selection: ScoreSelection
+): number[] {
+  const wanted = new Set(selection.measureIds);
+  const indices = new Set<number>();
+  for (const track of score.tracks)
+    for (const measure of track.measures)
+      if (wanted.has(measure.id)) indices.add(measure.index);
+  return [...indices].sort((a, b) => a - b);
+}
+
+/**
+ * What copying this selection puts on the clipboard, or null if there is
+ * nothing to copy.
+ *
+ * Shared by Copy and by Cut, so the two cannot come to disagree about what was
+ * taken — which is the bug that made cut-then-paste lose a track's instrument
+ * while copy-then-paste kept it.
+ */
+function clipboardFor(
+  score: Score,
+  selection: ScoreSelection
+): ClipboardData | null {
+  const kind = selectionKind(selection);
+  if (kind === 'notes') {
+    const events = selection.eventIds
+      .map(id => findEvent(score, id))
+      .filter(
+        (event): event is NoteEvent => event !== null && isNoteEvent(event)
+      );
+    if (events.length === 0) return null;
+    return {
+      kind: 'notes',
+      events,
+      anchorTick: Math.min(...events.map(e => e.startTick)),
+    };
+  }
+  if (kind === 'measures') {
+    const indices = selectedMeasureIndices(score, selection);
+    if (indices.length === 0) return null;
+    // The span from the first to the last, so a selection with a hole in it
+    // still copies as the run of bars a reader sees.
+    const from = indices[0] as number;
+    const to = (indices[indices.length - 1] as number) + 1;
+    const slice = sliceOf(score, from, to);
+    return { kind: 'measures', slice, count: slice.count };
+  }
+  if (kind === 'track') {
+    const track = score.tracks.find(t => t.id === selection.trackIds[0]);
+    return track ? { kind: 'track', track } : null;
+  }
+  return null;
+}
+
+/** The bars at [from, to) across every track — a vertical slice of the score. */
+function sliceOf(score: Score, from: number, to: number): MeasureSlice {
+  return {
+    count: to - from,
+    tracks: score.tracks.map(track => track.measures.slice(from, to)),
+  };
+}
 
 /** The track a paste should target: the current selection's own track scope if it has one, else the track of a selected event, else the score's first track. */
 function resolvePasteTrackId(
@@ -158,50 +262,78 @@ export const createSelectionSlice = <T extends EditingState>({
   copySelection: () => {
     const { score, selection } = get();
     if (!score) return;
-    const events = selection.eventIds
-      .map(id => findEvent(score, id))
-      .filter(
-        (event): event is NoteEvent => event !== null && isNoteEvent(event)
-      );
-    if (events.length === 0) return;
-    const anchorTick = Math.min(...events.map(e => e.startTick));
+    const data = clipboardFor(score, selection);
+    if (!data) return;
     set(state => {
-      state.clipboard = { events, anchorTick };
+      state.clipboard = data;
     });
   },
 
   cutSelection: options => {
     const { score, selection } = get();
     if (!score) return;
+    const kind = selectionKind(selection);
+    if (!kind) return;
 
-    const cutNotes = selection.eventIds
-      .map(id => findEvent(score, id))
-      .filter(
-        (event): event is NoteEvent => event !== null && isNoteEvent(event)
-      );
-    if (cutNotes.length === 0) return;
-
-    const noteIds = cutNotes.map(note => note.id);
-
-    // Measured before the delete, while the notes are still there to measure.
-    const trackId = cutNotes[0].trackId;
-    const sameTrack = cutNotes.every(note => note.trackId === trackId);
-    const fromTick = Math.min(...cutNotes.map(note => note.startTick));
-    const toTick = Math.max(
-      ...cutNotes.map(note => note.startTick + note.durationTicks)
-    );
-
+    // Copy first, always: cut is copy plus a removal, and a removal that
+    // happened without the copy is a delete somebody cannot undo by pasting.
     get().copySelection();
-    get().dispatchCommand(deleteEventsCommand(noteIds, 'Delete notes'));
+    if (!get().clipboard) return;
 
-    // Only for a single-track cut: sliding one track earlier while the others
-    // stay put is exactly the desynchronisation `insert` mode exists for, and
-    // doing it to several tracks at once by accident would be worse.
-    if (options?.closeGap && sameTrack) {
+    if (kind === 'notes') {
+      const cutNotes = selection.eventIds
+        .map(id => findEvent(score, id))
+        .filter(
+          (event): event is NoteEvent => event !== null && isNoteEvent(event)
+        );
+      if (cutNotes.length === 0) return;
+
+      // Measured before the delete, while the notes are still there to measure.
+      const trackId = cutNotes[0].trackId;
+      const sameTrack = cutNotes.every(note => note.trackId === trackId);
+      const fromTick = Math.min(...cutNotes.map(note => note.startTick));
+      const toTick = Math.max(
+        ...cutNotes.map(note => note.startTick + note.durationTicks)
+      );
+
       get().dispatchCommand(
-        transformCommand('Close gap', current =>
-          closeGap(current, trackId, fromTick, toTick - fromTick)
+        deleteEventsCommand(
+          cutNotes.map(note => note.id),
+          commandLabel('deleteEvents')
         )
+      );
+
+      // Only for a single-track cut: sliding one track earlier while the others
+      // stay put is exactly the desynchronisation `insert` mode exists for, and
+      // doing it to several tracks at once by accident would be worse.
+      if (options?.closeGap && sameTrack) {
+        get().dispatchCommand(
+          transformCommand(commandLabel('deleteEvents'), current =>
+            closeGap(current, trackId, fromTick, toTick - fromTick)
+          )
+        );
+      }
+    } else if (kind === 'measures') {
+      const indices = selectedMeasureIndices(score, selection);
+      if (indices.length === 0) return;
+      if (options?.closeGap) {
+        // Descending, so each removal cannot move the next one's index.
+        for (const index of [...indices].reverse())
+          get().dispatchCommand(
+            deleteMeasureCommand(index, commandLabel('deleteMeasure'))
+          );
+      } else {
+        get().dispatchCommand(
+          clearMeasuresCommand(selection.measureIds, commandLabel('clearBars'))
+        );
+      }
+    } else {
+      const trackId = selection.trackIds[0];
+      if (!trackId) return;
+      get().dispatchCommand(
+        options?.closeGap
+          ? deleteTrackCommand(trackId, commandLabel('deleteTrack'))
+          : clearTrackCommand(trackId, commandLabel('clearTrack'))
       );
     }
 
@@ -210,7 +342,71 @@ export const createSelectionSlice = <T extends EditingState>({
 
   paste: (atTick, options) => {
     const { score, clipboard, selection, editMode } = get();
-    if (!score || !clipboard || clipboard.events.length === 0) return;
+    if (!score || !clipboard) return;
+    /*
+      A measure or track paste needs a target of its own kind; a note paste does
+      not, and deliberately.
+
+      `canPasteInto` is the stricter rule and it belongs to the *menu*: an entry
+      that would do something unpredictable should not be offered. But paste is
+      also Cmd+V, and copying a phrase, clicking into another part — which moves
+      the caret and selects nothing — and pasting is the ordinary way to use it.
+      `resolvePasteTrackId` has always handled every one of those cases, so
+      refusing here would break the keyboard to enforce a rule about a menu.
+    */
+    if (
+      clipboard.kind !== 'notes' &&
+      selectionKind(selection) !== clipboard.kind
+    )
+      return;
+
+    // Paste obeys the edit mode for the same reason entry does: pasting on top
+    // of existing music is the same question as playing on top of it, and
+    // answering it differently in the two places would be arbitrary.
+    const scope = options?.scope ?? editMode;
+
+    if (clipboard.kind === 'measures') {
+      const indices = selectedMeasureIndices(score, selection);
+      const at = indices[0];
+      if (at === undefined) return;
+      get().dispatchCommand(
+        scope === 'insert'
+          ? insertMeasuresCommand(
+              at,
+              clipboard.slice,
+              commandLabel('pasteBars')
+            )
+          : replaceMeasuresCommand(
+              at,
+              clipboard.slice,
+              commandLabel('pasteBars')
+            )
+      );
+      get().clearSelection();
+      return;
+    }
+
+    if (clipboard.kind === 'track') {
+      const targetId = selection.trackIds[0];
+      if (!targetId) return;
+      const at = score.tracks.findIndex(t => t.id === targetId);
+      if (at < 0) return;
+      get().dispatchCommand(
+        scope === 'insert'
+          ? // Before the selected part, matching what inserting bars does:
+            // the thing you pasted onto moves down, it is not overwritten.
+            insertTrackCommand(clipboard.track, at, commandLabel('pasteTrack'))
+          : replaceTrackCommand(
+              targetId,
+              clipboard.track,
+              commandLabel('pasteTrack')
+            )
+      );
+      get().clearSelection();
+      return;
+    }
+
+    if (clipboard.events.length === 0) return;
     const trackId = resolvePasteTrackId(score, selection);
     if (!trackId) return;
     const anchorTick = atTick ?? clipboard.anchorTick;
@@ -223,13 +419,9 @@ export const createSelectionSlice = <T extends EditingState>({
     );
     const span = clipEnd - clipStart;
 
-    // Paste obeys the edit mode for the same reason entry does: pasting on top
-    // of existing music is the same question as playing on top of it, and
-    // answering it differently in the two places would be arbitrary.
-    const scope = options?.scope ?? editMode;
     if (scope === 'insert') {
       get().dispatchCommand(
-        transformCommand('Make room for paste', current =>
+        transformCommand(commandLabel('pasteEvents'), current =>
           makeRoom(current, trackId, anchorTick, span)
         )
       );
@@ -246,7 +438,9 @@ export const createSelectionSlice = <T extends EditingState>({
         )
         .map(note => note.id);
       if (occupying.length > 0)
-        get().dispatchCommand(deleteEventsCommand(occupying, 'Delete notes'));
+        get().dispatchCommand(
+          deleteEventsCommand(occupying, commandLabel('deleteEvents'))
+        );
     }
 
     get().dispatchCommand(
@@ -257,7 +451,7 @@ export const createSelectionSlice = <T extends EditingState>({
           voiceIndex: 0,
           anchorTick,
         },
-        'Paste notes'
+        commandLabel('pasteEvents')
       )
     );
   },

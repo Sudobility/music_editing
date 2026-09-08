@@ -1371,6 +1371,34 @@ describe('replacement and export scope', () => {
     expect(prepared!.request.instruction).toBe('darker');
   });
 
+  it('carries the chosen backend, and only when it is not the default', () => {
+    // Choosing the model for a whole score and not for a bar of it would send
+    // every replacement to the default backend however the piece was written.
+    const store = makeStore();
+    const measures = store.getState().score!.tracks[0].measures.slice(0, 2);
+    store.getState().setSelection({
+      eventIds: [],
+      measureIds: measures.map(m => m.id),
+      trackIds: [],
+    });
+
+    expect(
+      prepareReplacement(store, 'measures', {
+        ...submission(),
+        variant: 'deepseek',
+      })!.request.variant
+    ).toBe('deepseek');
+    expect(
+      prepareReplacement(store, 'measures', {
+        ...submission(),
+        variant: 'default',
+      })!.request
+    ).not.toHaveProperty('variant');
+    expect(
+      prepareReplacement(store, 'measures', submission())!.request
+    ).not.toHaveProperty('variant');
+  });
+
   it('answers null when the selection yields no region', () => {
     // "Replace the notes" with nothing selected has no honest answer.
     const store = makeStore();

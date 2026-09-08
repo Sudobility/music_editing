@@ -24,6 +24,7 @@ export * from './services/editing/key-group.js';
 export * from './services/editing/playing-pitches.js';
 export * from './services/editing/shortcuts.js';
 export * from './services/editing/copy.js';
+export * from './services/editing/selection-kind.js';
 export * from './services/editing/view-settings.js';
 export * from './services/editing/use-clipboard-prompts.js';
 export * from './services/selection/music-selection.js';
