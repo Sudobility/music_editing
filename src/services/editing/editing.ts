@@ -35,6 +35,7 @@ import type {
   Ornament,
   Pitch,
   Score,
+  Track,
   UUID,
 } from '@sudobility/music_types';
 import {
@@ -95,6 +96,7 @@ import {
   noteIdsInTickRange,
   noteIdsOverlappingRange,
   pitchToMidi,
+  pitchToString,
 } from '@sudobility/music_types';
 import { selectSelectedNotes } from '../../store/selectors.js';
 // Not the playback adapter: editing moves the *position*, and whatever is
@@ -131,7 +133,10 @@ import type {
 import {
   gmMaxPolyphony,
   insertWithRippleCommand,
+  midiIsInRange,
+  trackKeyboardRange,
   trackMaxPolyphony,
+  trackRangeIsBinding,
 } from '@sudobility/music_types';
 import type { EditMode } from '../../store/slices/ui-slice.js';
 import { ticksFor } from '@sudobility/music_types';
@@ -280,9 +285,72 @@ export function resolveInsertTarget(
 }
 
 /**
+ * Why `sounding` is a note `track` cannot play, or null if it can.
+ *
+ * The sibling of the polyphony refusal in `insertChordAtCaret`, and the same
+ * contract: a note the instrument has no key, string or drum for is *refused*,
+ * never quietly moved. Folding it into the compass (`foldMidiIntoRange`) is
+ * right for material nobody typed — a generator's output, an import — but a
+ * person who typed C5 and got C3 back would read it as a bug in the editor.
+ *
+ * **Sounding pitch, always.** Every compass in the catalogue is a sounding
+ * number, so a caller holding a written pitch inverts its lens first
+ * (`soundingPitchForTrack`) — the same direction `setNotePitch` already stores
+ * in. Comparing a written pitch here is invisible on a piano and wrong by a
+ * tone on a B-flat trumpet, which is exactly the case nobody tests by hand.
+ *
+ * Only against a compass the catalogue actually measured. A row marked
+ * `assumed`, `tunable` or `synthetic` is a plausible span rather than a fact,
+ * and refusing music against a guess is worse than letting an odd note
+ * through; `trackRangeIsBinding` is that distinction. Percussion is binding —
+ * a kit has the pieces it has.
+ *
+ * Returns the clause, not the whole toast: the call sites differ on what they
+ * were about to do ("not added" vs "not changed") and only they know it.
+ */
+function outOfRangeReason(
+  track: Track | null | undefined,
+  sounding: Pitch
+): string | null {
+  if (!track || !trackRangeIsBinding(track)) return null;
+  const range = trackKeyboardRange(track);
+  const midi = pitchToMidi(sounding);
+  if (midiIsInRange(midi, range)) return null;
+  const compass = `${pitchToString(midiToPitch(range.min))}-${pitchToString(midiToPitch(range.max))}`;
+  return `${pitchToString(sounding)} is ${midi > range.max ? 'above' : 'below'} ${track.instrumentName}'s range (${compass})`;
+}
+
+/**
+ * The first of `pitches` the track cannot play, refused with a toast.
+ *
+ * The whole chord goes or none of it does, as with polyphony: writing the
+ * playable half of a triad is a third answer nobody asked for.
+ */
+function refuseOutOfRange<T extends EditingState>(
+  store: EditorStoreApi<T>,
+  track: Track | null | undefined,
+  pitches: readonly Pitch[],
+  tail: string
+): boolean {
+  for (const pitch of pitches) {
+    const reason = outOfRangeReason(track, pitch);
+    if (reason) {
+      store
+        .getState()
+        .pushToast({ severity: 'warning', message: `${reason}, ${tail}` });
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Inserts a note at the current selection's implied measure+beat (see
  * `resolveInsertTarget`), using the store's current `snapGrid` as the
  * note's duration. No-op if there's no score or no resolvable target.
+ *
+ * The pitch is the *sounding* one, and a note outside the instrument's compass
+ * is refused rather than written (`outOfRangeReason`).
  */
 export function insertNoteAtCaret<T extends EditingState>(
   store: EditorStoreApi<T>,
@@ -307,6 +375,18 @@ export function insertNoteAtCaret<T extends EditingState>(
     state.activeVoiceIndex
   );
   if (!target) return;
+
+  // Refused, not folded: the toolbar and a tap on the stave both land here, and
+  // both are a person naming a pitch.
+  if (
+    refuseOutOfRange(
+      store,
+      findTrack(state.score, target.trackId),
+      [pitch],
+      'so it was not added.'
+    )
+  )
+    return;
 
   const { articulation, duration, advanceCaret = false } = options;
   // `duration` overrides the toolbar grid, for callers that carry their own --
@@ -436,6 +516,11 @@ export function insertChordAtCaret<T extends EditingState>(
     });
     return false;
   }
+
+  // The other half of "could the instrument play this": how many notes, then
+  // which notes. Same refusal, and the whole chord goes or none of it does.
+  if (refuseOutOfRange(store, track, pitches, 'so this chord was not added.'))
+    return false;
 
   const { duration, advanceCaret = false } = options;
   const durationTicks = ticksFor(duration ?? state.snapGrid, state.score.ppq);
@@ -1819,6 +1904,12 @@ export function setNotePitch<T extends EditingState>(
     pitchDisplay === 'written' && track
       ? soundingPitchForTrack(edited, track, key)
       : edited;
+  // Against `next`, never `edited`: on a B-flat trumpet read in written pitch
+  // the two differ by a tone, and the compass is a sounding one. Checking what
+  // was typed would refuse a written D#6 the instrument plays and accept a
+  // written E3 it cannot reach.
+  if (refuseOutOfRange(store, track, [next], 'so the note was not changed.'))
+    return;
   dispatchTracked(
     store,
     changePitchCommand([noteId], next, commandLabel('changePitch'))
@@ -1861,13 +1952,21 @@ export function commitPitchDrag<T extends EditingState>(
   steps: number
 ): void {
   if (steps === 0) return;
+  const score = store.getState().score;
+  const dragged = shiftDiatonic(from, steps);
+  // `from` is the note's stored pitch, so `dragged` is already sounding. The
+  // drag is refused whole rather than stopped at the edge: a drag that stuck at
+  // the top of the compass would read as the pointer being ignored.
+  const event = score ? findEvent(score, noteId) : null;
+  const track =
+    score && event && isNoteEvent(event)
+      ? findTrack(score, event.trackId)
+      : null;
+  if (refuseOutOfRange(store, track, [dragged], 'so the note was not moved.'))
+    return;
   dispatchTracked(
     store,
-    changePitchCommand(
-      [noteId],
-      shiftDiatonic(from, steps),
-      commandLabel('changePitch')
-    )
+    changePitchCommand([noteId], dragged, commandLabel('changePitch'))
   );
 }
 
