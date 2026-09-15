@@ -71,6 +71,22 @@ describe('score-slice', () => {
       expect(store.dirtyCount()).toBe(0);
     });
 
+    it('moves the shared caret to the top of a new score', () => {
+      const store = testEditingStore();
+      getMusicPositionSource().moveTo(960);
+      store.getState().setScore(twinkleScore());
+      expect(getMusicPosition().tick).toBe(0);
+    });
+
+    it('leaves the shared caret alone for a store opened in the background', () => {
+      // A host with a store per document: the position is the front
+      // document's, and a tab opened behind it must not move its caret.
+      const store = testEditingStore();
+      getMusicPositionSource().moveTo(960);
+      store.getState().setScore(twinkleScore(), { resetPosition: false });
+      expect(getMusicPosition().tick).toBe(960);
+    });
+
     it('clears any prior undo/redo history when resetHistory is not false', () => {
       const store = testEditingStore();
       store.getState().setScore(twinkleScore());

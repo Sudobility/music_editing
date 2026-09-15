@@ -111,9 +111,26 @@ export type PlayerBinding = {
   setTempoMultiplier(multiplier: number): void;
   setMetronome(enabled: boolean): void;
   setMasterVolume(volume: number): void;
-  /** Stops listening to both sides. Does not dispose the player: whoever made it owns it. */
+  /**
+   * Stops listening to both sides, pausing this store's playback if it is the
+   * one playing. Does not dispose the player: whoever made it owns it.
+   */
   unbind(): void;
 };
+
+/**
+ * The score each player last loaded, whichever binding loaded it.
+ *
+ * A player is app-wide and a binding is not. The published page binds a store
+ * of its own while the editor's binding stays alive beneath it — a pushed
+ * screen on the native app, the app-wide adapter on the web — and a binding
+ * loads only when its own score changes. So returning to the editor found the
+ * published piece still in the player, the editor's binding saw nothing to
+ * reload, and Play played somebody else's music. Keyed on the player, so every
+ * binding to it reads the same answer; weakly, so a disposed player is not
+ * kept alive by it.
+ */
+const loadedScores = new WeakMap<BindablePlayer, Score>();
 
 /** The measure a tick falls in, on the first track — every track shares the grid. */
 function measureAt(score: Score, tick: number) {
@@ -136,7 +153,16 @@ export function bindPlayer<T extends EditingState & Partial<TransportSettings>>(
 
   const write = (update: (draft: T) => void) => store.setState(update);
 
+  /** Whether the player holds this store's score, rather than another binding's. */
+  const ownsPlayer = (): boolean => {
+    const score = store.getState().score;
+    return score !== null && loadedScores.get(player) === score;
+  };
+
   const load = async (score: Score): Promise<void> => {
+    // Recorded before the await: from this moment the player is this score's,
+    // and a binding asking during the load must not start another.
+    loadedScores.set(player, score);
     try {
       await player.load(score, {
         visibleTrackIds: selectVisibleTrackIds(store.getState()),
@@ -149,7 +175,9 @@ export function bindPlayer<T extends EditingState & Partial<TransportSettings>>(
   const offPlayer = [
     player.onTransport(state =>
       write(draft => {
-        draft.state = state;
+        // Only the store whose score is sounding is playing. Another binding's
+        // playback must not lock this store's editing as though it were.
+        draft.state = ownsPlayer() ? state : 'stopped';
       })
     ),
     // Low-frequency and store-shaped: it reports per percent and behaves like
@@ -179,7 +207,9 @@ export function bindPlayer<T extends EditingState & Partial<TransportSettings>>(
     // mid-playback without rescheduling a note.
     if (state.visibleTrackIds !== lastVisible) {
       lastVisible = state.visibleTrackIds;
-      player.setVisibleTracks(selectVisibleTrackIds(state));
+      // The player is playing another binding's score: its channels are not
+      // this score's tracks. The next load carries the visible tracks anyway.
+      if (ownsPlayer()) player.setVisibleTracks(selectVisibleTrackIds(state));
     }
   });
 
@@ -225,6 +255,9 @@ export function bindPlayer<T extends EditingState & Partial<TransportSettings>>(
       // selected. Playing from the caret needs nothing — the caret is the
       // position the player resumes from.
       store.getState().clearSelection();
+      // Another binding may have loaded the player since this score was: put
+      // this one back first, so Play plays what this store shows.
+      if (!ownsPlayer()) await load(score);
       try {
         await player.play();
       } catch (error) {
@@ -281,6 +314,22 @@ export function bindPlayer<T extends EditingState & Partial<TransportSettings>>(
     unbind() {
       offStore();
       for (const off of offPlayer) off();
+      /*
+        Music this binding started stops with it. A binding ends when its
+        screen does — a published page closed, a tab put behind another — and
+        playback carrying on under a screen that no longer shows that score is
+        a transport nobody can reach. Paused rather than stopped, so the caret
+        stays where the music was; and only when this store's score is the one
+        playing, so unbinding never interrupts another binding's playback.
+        After the listeners are gone, so the pause is not mirrored into a store
+        that is no longer bound.
+      */
+      if (store.getState().state === 'playing' && ownsPlayer()) {
+        player.pause();
+        write(draft => {
+          draft.state = 'paused';
+        });
+      }
     },
   };
 }

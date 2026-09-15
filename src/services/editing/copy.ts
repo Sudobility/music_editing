@@ -15,57 +15,68 @@
  * build and look like a translation someone forgot.
  */
 
-/** One key per command, named for the command rather than its wording. */
-export type CommandLabelKey =
-  | 'addNote'
-  | 'addMeasure'
-  | 'addTrack'
-  | 'changeAccidental'
-  | 'changeArticulation'
-  | 'changeDuration'
-  | 'changeDynamic'
-  | 'changePitch'
-  | 'changeClef'
-  | 'changeKeySignature'
-  | 'changeRepeats'
-  | 'changeMetadata'
-  | 'changeTempo'
-  | 'changeTimeSignature'
-  | 'changeTrackProps'
-  | 'changeVelocity'
-  | 'deleteEvents'
-  | 'changeVoice'
-  | 'clearBars'
-  | 'clearTrack'
-  | 'deleteMeasure'
-  | 'deleteTrack'
-  | 'importScore'
-  | 'insertWithRipple'
-  | 'moveNotes'
-  | 'pasteEvents'
-  | 'pasteBars'
-  | 'pasteTrack'
-  | 'quantize'
-  | 'relocateNotes'
-  | 'resizeNotes'
-  | 'setChordSymbol'
-  | 'setFingering'
-  | 'setPickup'
-  | 'setLyric'
-  | 'toGraceNote'
-  | 'changeBeam'
-  | 'changeBarline'
-  | 'changeMeasureClef'
-  | 'changeNavigation'
-  | 'changeOrnament'
-  | 'toggleArpeggiate'
-  | 'toggleGlissando'
-  | 'toggleOttava'
-  | 'toggleFermata'
-  | 'toggleHairpin'
-  | 'toggleSlur'
-  | 'toggleTie'
-  | 'transpose';
+/**
+ * One key per command, named for the command rather than its wording.
+ *
+ * An array with the type read off it, not a bare union: a host has to prove
+ * every one of these has a translation, and a union has no runtime form to
+ * walk. Both apps' undo histories printed raw keys for labels nobody had
+ * written — the web for eleven commands, the native app for all but four —
+ * because nothing could enumerate what was needed.
+ */
+export const COMMAND_LABEL_KEYS = [
+  'addNote',
+  'addMeasure',
+  'addTrack',
+  'changeAccidental',
+  'changeArticulation',
+  'changeDuration',
+  'changeDynamic',
+  'changePitch',
+  'changeClef',
+  'changeKeySignature',
+  'changeRepeats',
+  'changeMetadata',
+  'changeTempo',
+  'changeTimeSignature',
+  'changeTrackProps',
+  'changeVelocity',
+  'deleteEvents',
+  'changeVoice',
+  'clearBars',
+  'clearTrack',
+  'deleteMeasure',
+  'deleteTrack',
+  'importScore',
+  'insertWithRipple',
+  'moveNotes',
+  'pasteEvents',
+  'pasteBars',
+  'pasteTrack',
+  'quantize',
+  'relocateNotes',
+  'resizeNotes',
+  'setChordSymbol',
+  'setFingering',
+  'setPickup',
+  'setLyric',
+  'toGraceNote',
+  'changeBeam',
+  'changeBarline',
+  'changeMeasureClef',
+  'changeNavigation',
+  'changeOrnament',
+  'toggleArpeggiate',
+  'toggleGlissando',
+  'toggleOttava',
+  'toggleFermata',
+  'toggleHairpin',
+  'toggleSlur',
+  'toggleTie',
+  'transpose',
+] as const;
+
+export type CommandLabelKey = (typeof COMMAND_LABEL_KEYS)[number];
 
 export type EditingCopy = {
   /**

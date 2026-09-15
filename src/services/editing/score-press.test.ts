@@ -22,6 +22,7 @@ const plain: ScorePressModifiers = {
   noteInput: false,
   pitchDisplay: 'concert',
   anchor: null,
+  pointTick: null,
 };
 
 function twoTracks() {
@@ -99,7 +100,7 @@ describe('routeScorePress', () => {
         tick: target.startTick + 1,
         pitch: null,
       },
-      { ...plain, mod: true }
+      { ...plain, mod: true, pointTick: target.startTick + 1 }
     );
 
     expect(store.getState().selection.range?.endTick).toBe(
@@ -107,6 +108,29 @@ describe('routeScorePress', () => {
     );
     expect(store.getState().selection.eventIds).toContain(notes[0]!.id);
     expect(getMusicPosition().reportedTick).toBe(0);
+  });
+
+  it('mod reads the tick the canvas reports for the point, not the hit', () => {
+    // The hit's tick is the canvas's best guess *inside a measure*, and is 0
+    // where it has none; a press between systems has no hit at all. The web
+    // always asked the canvas's tickAt instead, which is what makes a
+    // cmd-click on an empty stretch of page do something.
+    const { store } = twoTracks();
+    routeScorePress(store, null, { ...plain, mod: true, pointTick: 960 });
+    expect(store.getState().selection.range?.endTick).toBe(960);
+
+    routeScorePress(
+      store,
+      { kind: 'stave', trackId: 'x', tick: 0, pitch: null },
+      { ...plain, mod: true, pointTick: 1440 }
+    );
+    expect(store.getState().selection.range?.endTick).toBe(1440);
+  });
+
+  it('mod with no tick under the point does nothing', () => {
+    const { store } = twoTracks();
+    routeScorePress(store, null, { ...plain, mod: true, pointTick: null });
+    expect(store.getState().selection.range).toBeUndefined();
   });
 
   it('a note press selects the chord and aims the caret at it', () => {
@@ -364,9 +388,16 @@ describe('classifyPointerDown', () => {
 });
 
 describe('startPointerGesture', () => {
-  it('selects the chord through selectNotes when a move starts off the selection', () => {
+  it('selects the chord when a move starts off the selection, and nothing else', () => {
+    // A move is about which notes, like a box: the web never aimed the caret or
+    // switched the active track on an Option-press, and doing so would yank
+    // the playhead to wherever a drag happened to start.
     const { store, score } = twoTracks();
-    const note = allNotes(score)[2]!;
+    const note = allNotes(score).find(
+      n => n.trackId === score.tracks[1]!.id && n.startTick > 0
+    )!;
+    getMusicPositionSource().moveTo(0);
+    const activeBefore = store.getState().activeTrackId;
     const gesture = startPointerGesture(
       store,
       { kind: 'note', eventIds: [note.id], trackId: note.trackId, tick: 0 },
@@ -374,7 +405,8 @@ describe('startPointerGesture', () => {
     );
     expect(gesture.kind).toBe('move');
     expect(store.getState().selection.eventIds).toEqual([note.id]);
-    expect(getMusicPosition().reportedTick).toBe(note.startTick);
+    expect(getMusicPosition().reportedTick).toBe(0);
+    expect(store.getState().activeTrackId).toBe(activeBefore);
   });
 });
 

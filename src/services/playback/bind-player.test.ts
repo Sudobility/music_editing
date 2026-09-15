@@ -28,8 +28,9 @@ function fakePlayer(overrides: Partial<BindablePlayer> = {}): Fake {
     (...args: unknown[]) => {
       (calls[name] ??= []).push(args);
     };
-  let transport: ((s: TransportPlaybackState) => void) | null = null;
-  let load: ((s: PlaybackLoadState) => void) | null = null;
+  // Sets, as a real player keeps: two bindings on one player both listen.
+  const transport = new Set<(s: TransportPlaybackState) => void>();
+  const load = new Set<(s: PlaybackLoadState) => void>();
   const player: Fake = {
     load: vi.fn(async (...args: unknown[]) => record('load')(...args)),
     play: vi.fn(async () => record('play')()),
@@ -41,16 +42,16 @@ function fakePlayer(overrides: Partial<BindablePlayer> = {}): Fake {
     setMasterVolume: record('setMasterVolume'),
     setVisibleTracks: record('setVisibleTracks'),
     onTransport: fn => {
-      transport = fn;
-      return () => (transport = null);
+      transport.add(fn);
+      return () => transport.delete(fn);
     },
     onLoadState: fn => {
-      load = fn;
-      return () => (load = null);
+      load.add(fn);
+      return () => load.delete(fn);
     },
     ...overrides,
-    emitTransport: s => transport?.(s),
-    emitLoad: s => load?.(s),
+    emitTransport: s => transport.forEach(fn => fn(s)),
+    emitLoad: s => load.forEach(fn => fn(s)),
     calls,
   };
   return player;
@@ -189,6 +190,75 @@ describe('bindPlayer', () => {
       masterVolume: 0.25,
     });
     expect(player.calls.setTempoMultiplier).toEqual([[1.5]]);
+  });
+
+  it('pauses what it is playing when it unbinds, and nothing else', () => {
+    // Leaving a published page, or a tab, must not leave its music running
+    // under a screen that is not showing it.
+    const store = testEditingStore(twoTrackScore());
+    const player = fakePlayer();
+    const binding = bindPlayer(player, store);
+    player.emitTransport('playing');
+    binding.unbind();
+    expect(player.calls.pause).toHaveLength(1);
+
+    const idle = testEditingStore(twoTrackScore());
+    const other = fakePlayer();
+    bindPlayer(other, idle).unbind();
+    expect(other.calls.pause ?? []).toHaveLength(0);
+  });
+
+  describe('two stores on one player', () => {
+    /*
+      A player is app-wide and a binding is not: the published page binds its
+      own store while the editor's binding stays alive underneath it (a pushed
+      screen on the native app, the app-wide adapter on the web). Each binding
+      loads only when its own score changes, so coming back to the editor found
+      the published piece still in the player and played that.
+    */
+    it('reloads its own score before playing when another binding loaded since', async () => {
+      const editor = testEditingStore(twoTrackScore());
+      const published = testEditingStore(twoTrackScore());
+      const player = fakePlayer();
+      const editorBinding = bindPlayer(player, editor);
+      bindPlayer(player, published);
+      expect(player.calls.load!.at(-1)![0]).toBe(published.getState().score);
+
+      await editorBinding.togglePlay();
+      expect(player.calls.load!.at(-1)![0]).toBe(editor.getState().score);
+      expect(player.calls.play).toHaveLength(1);
+    });
+
+    it('does not reload when its score is already the one loaded', async () => {
+      const store = testEditingStore(twoTrackScore());
+      const player = fakePlayer();
+      const binding = bindPlayer(player, store);
+      await binding.togglePlay();
+      expect(player.calls.load).toHaveLength(1);
+    });
+
+    it('mirrors the transport only into the store whose score is playing', () => {
+      const editor = testEditingStore(twoTrackScore());
+      const published = testEditingStore(twoTrackScore());
+      const player = fakePlayer();
+      bindPlayer(player, editor);
+      bindPlayer(player, published);
+      player.emitTransport('playing');
+      expect(published.getState().state).toBe('playing');
+      // The editor is not what is sounding, so it is not locked as though it were.
+      expect(editor.getState().state).toBe('stopped');
+    });
+
+    it('leaves hidden tracks to the binding whose score is loaded', () => {
+      const editor = testEditingStore(twoTrackScore());
+      const published = testEditingStore(twoTrackScore());
+      const player = fakePlayer();
+      bindPlayer(player, editor);
+      bindPlayer(player, published);
+      const [first] = editor.getState().score!.tracks;
+      editor.getState().setVisibleTracks([first!.id]);
+      expect(player.calls.setVisibleTracks ?? []).toHaveLength(0);
+    });
   });
 
   it('stops listening once unbound, and leaves the player alive', () => {

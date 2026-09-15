@@ -27,6 +27,16 @@ import type { EditingState, SliceArgs } from '../editing-store.js';
 export type SetScoreOptions = {
   /** Defaults to `true`: loading/replacing the whole score (open project, accept a fresh AI generation, import) starts a clean undo/redo stack. Pass `false` only when the caller has its own reason to keep history spanning the swap. */
   resetHistory?: boolean;
+  /**
+   * Defaults to `true`: a new score starts at the top, so the caret — the one
+   * shared playback position — moves to 0.
+   *
+   * `false` for a store that is not the one being played: a host with a store
+   * per document opens documents in the background, and there the shared
+   * position belongs to the document in front. Moving it would send that
+   * document's caret back to the start because a tab opened behind it.
+   */
+  resetPosition?: boolean;
 };
 
 export type ScoreSlice = {
@@ -146,8 +156,9 @@ export const createScoreSlice = <T extends EditingState>({
       // the user did not make; the correction persists with their next one.
       // Identity is preserved when there is nothing to correct.
       const resolved = scoreWithResolvedKits(score);
-      // A new score starts at the top, and the caret is the shared position.
-      getMusicPositionSource().moveTo(0);
+      // A new score starts at the top, and the caret is the shared position —
+      // unless this store is not the one the position belongs to.
+      if (options.resetPosition ?? true) getMusicPositionSource().moveTo(0);
       set(state => {
         state.score = resolved;
         state.validationIssues = validateScore(resolved);

@@ -73,6 +73,17 @@ export type ScorePressModifiers = {
   pitchDisplay: PitchDisplay;
   /** The bar a shift-extended bar selection grows from; see `selectMeasureRange`. */
   anchor: number | null;
+  /**
+   * The tick the canvas reports for the press point (`ScoreCanvas.tickAt`), or
+   * null where there is none. What a Mod press selects *to*.
+   *
+   * Not the hit's own tick: a hit only exists inside a measure, and its tick
+   * falls back to 0 where the canvas has no answer — so reading it made a
+   * Mod press between systems do nothing and one on an unmapped stretch select
+   * back to the start of the piece. Required rather than defaulted to the hit,
+   * so a host cannot quietly keep the old answer.
+   */
+  pointTick: number | null;
 };
 
 /**
@@ -106,7 +117,17 @@ export function routeScorePress<T extends EditingState>(
 ): number | null {
   const state = store.getState();
   const { shift, mod, anchor } = modifiers;
-  if (!state.score || !hit) return anchor;
+  if (!state.score) return anchor;
+
+  // Mod is decided before the hit, because it needs none: it selects from the
+  // caret to wherever the point is in time. The bar-number band is the one
+  // exception, below — Mod+Shift there means "this bar on every track".
+  if (mod && hit?.kind !== 'measureNumber' && hit?.kind !== 'trackGutter') {
+    if (modifiers.pointTick !== null)
+      selectToTick(store, { tick: modifiers.pointTick, allTracks: shift });
+    return anchor;
+  }
+  if (!hit) return anchor;
 
   if (hit.kind === 'trackGutter') {
     state.setActiveTrack(hit.trackId);
@@ -121,11 +142,6 @@ export function routeScorePress<T extends EditingState>(
       extend: shift && !mod,
       allTracks: mod && shift,
     });
-  }
-
-  if (mod) {
-    selectToTick(store, { tick: hit.tick, allTracks: shift });
-    return anchor;
   }
 
   if (hit.kind === 'note') {
@@ -284,9 +300,14 @@ export function classifyPointerDown(
 
 /**
  * `classifyPointerDown`, then the one write a gesture needs before it starts:
- * a move off the selection selects the pressed chord through `selectNotes`, so
- * the notes being dragged are the notes that look selected, on the active
- * track, with the caret on them.
+ * a move off the selection selects the pressed chord, so the notes being
+ * dragged are the notes that look selected.
+ *
+ * **Only the selection changes** — not through `selectNotes`, which also aims
+ * the caret and switches the active track. A move is about which notes, like a
+ * box select; yanking the playhead to wherever a drag happened to start, and
+ * re-colouring the staves before the drop has even picked a destination, is
+ * what the web never did.
  */
 export function startPointerGesture<T extends EditingState>(
   store: EditingStoreApi<T>,
@@ -295,7 +316,11 @@ export function startPointerGesture<T extends EditingState>(
 ): PointerGesture {
   const gesture = classifyPointerDown(store.getState(), hit, modifiers);
   if (gesture.kind === 'move' && gesture.selectChord)
-    selectNotes(store, gesture.selectChord);
+    store.getState().setSelection({
+      eventIds: [...gesture.selectChord],
+      measureIds: [],
+      trackIds: [],
+    });
   return gesture;
 }
 

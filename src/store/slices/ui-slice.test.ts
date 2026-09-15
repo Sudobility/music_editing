@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import * as musicTypes from '@sudobility/music_types';
+import { NOTATION_ICON_NAMES } from '@sudobility/music_types';
 import { testEditingStore } from '../../test/store.js';
 import { EDIT_MODES, EDIT_MODE_OPTIONS } from './ui-slice.js';
 import type { EditMode } from './ui-slice.js';
@@ -194,6 +196,40 @@ describe('EDIT_MODE_OPTIONS', () => {
       expect(option.hintKey).toBe(`editor.${option.value}ModeHint`);
       expect(option.icon).toMatch(/Icon$/);
     }
+  });
+
+  it('gives each the glyph and keys both toolbars draw', () => {
+    expect(EDIT_MODE_OPTIONS).toEqual([
+      {
+        value: 'insert',
+        icon: 'InsertModeIcon',
+        labelKey: 'editor.insertMode',
+        hintKey: 'editor.insertModeHint',
+      },
+      {
+        value: 'replace',
+        icon: 'ReplaceModeIcon',
+        labelKey: 'editor.replaceMode',
+        hintKey: 'editor.replaceModeHint',
+      },
+      {
+        value: 'stack',
+        icon: 'ChordIcon',
+        labelKey: 'editor.stackMode',
+        hintKey: 'editor.stackModeHint',
+      },
+    ]);
+    const known = new Set<string>(NOTATION_ICON_NAMES);
+    for (const option of EDIT_MODE_OPTIONS) {
+      expect(known.has(option.icon)).toBe(true);
+    }
+  });
+
+  it('is declared here, not passed through from music_types', () => {
+    // Two packages publishing one name is a TS2308 in music_lib's build and a
+    // "Cannot redefine property" crash in a CommonJS consumer. It lives beside
+    // `EditMode` and nowhere else.
+    expect('EDIT_MODE_OPTIONS' in musicTypes).toBe(false);
   });
 
   it('is typed as the edit modes this package declares', () => {

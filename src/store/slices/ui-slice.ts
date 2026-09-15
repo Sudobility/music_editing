@@ -8,7 +8,11 @@
  * time, so nothing switches between them.
  */
 import { createId } from '@sudobility/music_types';
-import type { DurationName, UUID } from '@sudobility/music_types';
+import type {
+  DurationName,
+  NotationIconName,
+  UUID,
+} from '@sudobility/music_types';
 import type { EditingState, SliceArgs } from '../editing-store.js';
 import { getMusicSelectionSource } from '../../services/selection/singleton.js';
 
@@ -96,18 +100,48 @@ export const EDIT_MODES = ['insert', 'replace', 'stack'] as const;
 
 export type EditMode = (typeof EDIT_MODES)[number];
 
-/*
-  `EDIT_MODE_OPTIONS` — the edit modes as a toolbar offers them, in order, each
-  with its glyph and its label and hint keys — belongs beside `EditMode`, and is
-  published from here. For now it is music_types' own binding passed through
-  rather than a second declaration: music_lib `export *`s both packages, and
-  two different bindings under one name are a TS2308 in its build and a
-  "Cannot redefine property" crash at load in any CommonJS consumer (the native
-  app's jest suite died on every file). When music_types drops its copy, the
-  literal moves here; `ui-slice.test.ts` pins it to `EDIT_MODES` meanwhile, so
-  the two lists cannot drift apart before then.
-*/
-export { EDIT_MODE_OPTIONS } from '@sudobility/music_types';
+/**
+ * The edit modes as a toolbar offers them: in order, each with its glyph and
+ * its label and hint keys.
+ *
+ * Beside `EditMode` because that is what it lists. It sat in music_types for a
+ * while, where the three values had to be spelled out again because that
+ * package may not import the type naming them — a second statement of the
+ * vocabulary, pinned to this one only by a test. It was passed through from
+ * here rather than declared twice: music_lib `export *`s both packages, and two
+ * bindings under one name are a TS2308 in its build and a "Cannot redefine
+ * property" crash at load in any CommonJS consumer (the native app's jest suite
+ * died on every file). Now there is one binding, and it is this one.
+ *
+ * Stack's hint has a second form, `editor.stackModeUnavailable`, for a track
+ * whose instrument cannot play a chord — that depends on the track, so the
+ * caller picks it (`editModeHintKey`).
+ */
+export const EDIT_MODE_OPTIONS: ReadonlyArray<{
+  value: EditMode;
+  icon: NotationIconName;
+  labelKey: string;
+  hintKey: string;
+}> = [
+  {
+    value: 'insert',
+    icon: 'InsertModeIcon',
+    labelKey: 'editor.insertMode',
+    hintKey: 'editor.insertModeHint',
+  },
+  {
+    value: 'replace',
+    icon: 'ReplaceModeIcon',
+    labelKey: 'editor.replaceMode',
+    hintKey: 'editor.replaceModeHint',
+  },
+  {
+    value: 'stack',
+    icon: 'ChordIcon',
+    labelKey: 'editor.stackMode',
+    hintKey: 'editor.stackModeHint',
+  },
+];
 
 export type UiSlice = {
   /**
