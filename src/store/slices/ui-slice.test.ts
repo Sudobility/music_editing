@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { testEditingStore } from '../../test/store.js';
+import { EDIT_MODES, EDIT_MODE_OPTIONS } from './ui-slice.js';
+import type { EditMode } from './ui-slice.js';
 
 describe('ui-slice', () => {
   it('defaults to no explicit active track, system theme, zoom 1, quarter-note snap, developer mode off', () => {
@@ -175,5 +177,27 @@ describe('pitchDisplay', () => {
     expect(store.getState().pitchDisplay).toBe('concert');
     store.getState().setPitchDisplay('written');
     expect(store.getState().pitchDisplay).toBe('written');
+  });
+});
+
+describe('EDIT_MODE_OPTIONS', () => {
+  it('offers every edit mode once, in toolbar order', () => {
+    expect(EDIT_MODE_OPTIONS.map(option => option.value)).toEqual([
+      ...EDIT_MODES,
+    ]);
+    expect(EDIT_MODES).toEqual(['insert', 'replace', 'stack']);
+  });
+
+  it('carries a label key, a hint key and a glyph for each', () => {
+    for (const option of EDIT_MODE_OPTIONS) {
+      expect(option.labelKey).toBe(`editor.${option.value}Mode`);
+      expect(option.hintKey).toBe(`editor.${option.value}ModeHint`);
+      expect(option.icon).toMatch(/Icon$/);
+    }
+  });
+
+  it('is typed as the edit modes this package declares', () => {
+    const values: readonly EditMode[] = EDIT_MODE_OPTIONS.map(o => o.value);
+    expect(values).toEqual([...EDIT_MODES]);
   });
 });

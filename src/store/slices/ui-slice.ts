@@ -92,7 +92,22 @@ const DEFAULT_DEV_SETTINGS: DevSettings = {
  * whether one gesture makes a chord — keys held together are one chord in
  * every mode, because that is what playing them means.
  */
-export type EditMode = 'insert' | 'replace' | 'stack';
+export const EDIT_MODES = ['insert', 'replace', 'stack'] as const;
+
+export type EditMode = (typeof EDIT_MODES)[number];
+
+/*
+  `EDIT_MODE_OPTIONS` — the edit modes as a toolbar offers them, in order, each
+  with its glyph and its label and hint keys — belongs beside `EditMode`, and is
+  published from here. For now it is music_types' own binding passed through
+  rather than a second declaration: music_lib `export *`s both packages, and
+  two different bindings under one name are a TS2308 in its build and a
+  "Cannot redefine property" crash at load in any CommonJS consumer (the native
+  app's jest suite died on every file). When music_types drops its copy, the
+  literal moves here; `ui-slice.test.ts` pins it to `EDIT_MODES` meanwhile, so
+  the two lists cannot drift apart before then.
+*/
+export { EDIT_MODE_OPTIONS } from '@sudobility/music_types';
 
 export type UiSlice = {
   /**

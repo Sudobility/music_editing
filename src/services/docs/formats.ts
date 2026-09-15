@@ -14,6 +14,7 @@
  * Every description is an i18n key, so the prose lives in each host's locale
  * files and the library holds no strings in any language.
  */
+import { WRITABLE_EXPORT_FORMATS } from '../editing/export-plan.js';
 
 export type FormatEntry = {
   id: string;
@@ -43,16 +44,18 @@ export const IMPORT_FORMATS: readonly FormatEntry[] = [
   { id: 'project', extensions: '.json', noteKey: 'docs.formats.in.project' },
 ];
 
+/**
+ * What the docs export table lists: every format the export menu writes, then
+ * printing, which produces a document rather than a file.
+ *
+ * Derived from `WRITABLE_EXPORT_FORMATS` rather than written out beside it: the
+ * table was its own list, and a list about the menu is a copy of the menu.
+ */
 export const EXPORT_FORMATS: readonly FormatEntry[] = [
-  { id: 'midi', extensions: '.mid', noteKey: 'docs.formats.out.midi' },
-  {
-    id: 'musicxml',
-    extensions: '.musicxml',
-    noteKey: 'docs.formats.out.musicxml',
-  },
-  { id: 'xm', extensions: '.xm', noteKey: 'docs.formats.out.tracker' },
-  { id: 'wav', extensions: '.wav', noteKey: 'docs.formats.out.wav' },
-  { id: 'mp3', extensions: '.mp3', noteKey: 'docs.formats.out.mp3' },
-  { id: 'project', extensions: '.json', noteKey: 'docs.formats.out.project' },
+  ...WRITABLE_EXPORT_FORMATS.map(format => ({
+    id: format.id,
+    extensions: `.${format.extension}`,
+    noteKey: format.noteKey,
+  })),
   { id: 'print', extensions: '—', noteKey: 'docs.formats.out.print' },
 ];

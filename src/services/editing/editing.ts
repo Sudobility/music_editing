@@ -20,6 +20,12 @@
  * are not re-announced on every subsequent unrelated edit.
  */
 import { commandLabel, editingCopy } from './copy.js';
+import {
+  refuseOutOfRange,
+  refuseOutOfRangeArrival,
+  refuseOutOfRangeChanges,
+  refuseOutOfRangeTranspose,
+} from './range-refusal.js';
 import type {
   EditingState,
   EditingStoreApi,
@@ -35,7 +41,6 @@ import type {
   Ornament,
   Pitch,
   Score,
-  Track,
   UUID,
 } from '@sudobility/music_types';
 import {
@@ -96,7 +101,6 @@ import {
   noteIdsInTickRange,
   noteIdsOverlappingRange,
   pitchToMidi,
-  pitchToString,
 } from '@sudobility/music_types';
 import { selectSelectedNotes } from '../../store/selectors.js';
 // Not the playback adapter: editing moves the *position*, and whatever is
@@ -133,13 +137,16 @@ import type {
 import {
   gmMaxPolyphony,
   insertWithRippleCommand,
-  midiIsInRange,
-  trackKeyboardRange,
   trackMaxPolyphony,
-  trackRangeIsBinding,
 } from '@sudobility/music_types';
 import type { EditMode } from '../../store/slices/ui-slice.js';
 import { ticksFor } from '@sudobility/music_types';
+import {
+  MAX_OCTAVE,
+  MAX_TIME_SIG_NUMERATOR,
+  MIN_OCTAVE,
+  TIME_SIG_DENOMINATOR_OPTIONS,
+} from '@sudobility/music_types';
 import {
   addNoteCommand,
   addTrackCommand,
@@ -285,66 +292,6 @@ export function resolveInsertTarget(
 }
 
 /**
- * Why `sounding` is a note `track` cannot play, or null if it can.
- *
- * The sibling of the polyphony refusal in `insertChordAtCaret`, and the same
- * contract: a note the instrument has no key, string or drum for is *refused*,
- * never quietly moved. Folding it into the compass (`foldMidiIntoRange`) is
- * right for material nobody typed — a generator's output, an import — but a
- * person who typed C5 and got C3 back would read it as a bug in the editor.
- *
- * **Sounding pitch, always.** Every compass in the catalogue is a sounding
- * number, so a caller holding a written pitch inverts its lens first
- * (`soundingPitchForTrack`) — the same direction `setNotePitch` already stores
- * in. Comparing a written pitch here is invisible on a piano and wrong by a
- * tone on a B-flat trumpet, which is exactly the case nobody tests by hand.
- *
- * Only against a compass the catalogue actually measured. A row marked
- * `assumed`, `tunable` or `synthetic` is a plausible span rather than a fact,
- * and refusing music against a guess is worse than letting an odd note
- * through; `trackRangeIsBinding` is that distinction. Percussion is binding —
- * a kit has the pieces it has.
- *
- * Returns the clause, not the whole toast: the call sites differ on what they
- * were about to do ("not added" vs "not changed") and only they know it.
- */
-function outOfRangeReason(
-  track: Track | null | undefined,
-  sounding: Pitch
-): string | null {
-  if (!track || !trackRangeIsBinding(track)) return null;
-  const range = trackKeyboardRange(track);
-  const midi = pitchToMidi(sounding);
-  if (midiIsInRange(midi, range)) return null;
-  const compass = `${pitchToString(midiToPitch(range.min))}-${pitchToString(midiToPitch(range.max))}`;
-  return `${pitchToString(sounding)} is ${midi > range.max ? 'above' : 'below'} ${track.instrumentName}'s range (${compass})`;
-}
-
-/**
- * The first of `pitches` the track cannot play, refused with a toast.
- *
- * The whole chord goes or none of it does, as with polyphony: writing the
- * playable half of a triad is a third answer nobody asked for.
- */
-function refuseOutOfRange<T extends EditingState>(
-  store: EditorStoreApi<T>,
-  track: Track | null | undefined,
-  pitches: readonly Pitch[],
-  tail: string
-): boolean {
-  for (const pitch of pitches) {
-    const reason = outOfRangeReason(track, pitch);
-    if (reason) {
-      store
-        .getState()
-        .pushToast({ severity: 'warning', message: `${reason}, ${tail}` });
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
  * Inserts a note at the current selection's implied measure+beat (see
  * `resolveInsertTarget`), using the store's current `snapGrid` as the
  * note's duration. No-op if there's no score or no resolvable target.
@@ -383,7 +330,7 @@ export function insertNoteAtCaret<T extends EditingState>(
       store,
       findTrack(state.score, target.trackId),
       [pitch],
-      'so it was not added.'
+      'addNote'
     )
   )
     return;
@@ -509,18 +456,18 @@ export function insertChordAtCaret<T extends EditingState>(
   if (total > limit) {
     store.getState().pushToast({
       severity: 'warning',
-      message:
-        limit === 1
-          ? `${track?.instrumentName ?? 'This instrument'} plays one note at a time, so this chord was not added.`
-          : `${track?.instrumentName ?? 'This instrument'} plays at most ${limit} notes at once, so this chord was not added.`,
+      message: editingCopy().tooManyNotes({
+        instrument: track?.instrumentName ?? null,
+        limit,
+        refused: 'addChord',
+      }),
     });
     return false;
   }
 
   // The other half of "could the instrument play this": how many notes, then
   // which notes. Same refusal, and the whole chord goes or none of it does.
-  if (refuseOutOfRange(store, track, pitches, 'so this chord was not added.'))
-    return false;
+  if (refuseOutOfRange(store, track, pitches, 'addChord')) return false;
 
   const { duration, advanceCaret = false } = options;
   const durationTicks = ticksFor(duration ?? state.snapGrid, state.score.ppq);
@@ -620,6 +567,10 @@ export function transposeSemitone<T extends EditingState>(
   if (!state.score) return;
   const ids = selectedNoteIds(state.score, state.selection);
   if (ids.length === 0) return;
+  if (
+    refuseOutOfRangeTranspose(store, state.score, ids, direction, 'transpose')
+  )
+    return;
   dispatchTracked(
     store,
     transposeCommand(ids, direction, commandLabel('transpose'))
@@ -635,6 +586,16 @@ export function transposeOctave<T extends EditingState>(
   if (!state.score) return;
   const ids = selectedNoteIds(state.score, state.selection);
   if (ids.length === 0) return;
+  if (
+    refuseOutOfRangeTranspose(
+      store,
+      state.score,
+      ids,
+      direction * 12,
+      'transpose'
+    )
+  )
+    return;
   dispatchTracked(
     store,
     transposeCommand(ids, direction * 12, commandLabel('transpose'))
@@ -1046,18 +1007,26 @@ export function changeDuration<T extends EditingState>(
   );
 }
 
-/** Sets the selected notes' velocity (0-127). No-op if no notes are selected. */
+/**
+ * Sets the selected notes' velocity. No-op if no notes are selected.
+ *
+ * Rounded and clamped to MIDI's 0-127 here rather than in each panel: the web
+ * field clamped and the native one did not, so a typed 200 was "as loud as it
+ * goes" in one app and a validation error in the other. A non-number writes
+ * nothing.
+ */
 export function changeVelocity<T extends EditingState>(
   store: EditorStoreApi<T>,
   velocity: number
 ): void {
   const state = store.getState();
-  if (!state.score) return;
+  if (!state.score || !Number.isFinite(velocity)) return;
   const ids = selectedNoteIds(state.score, state.selection);
   if (ids.length === 0) return;
+  const clamped = Math.max(0, Math.min(127, Math.round(velocity)));
   dispatchTracked(
     store,
-    changeVelocityCommand(ids, velocity, commandLabel('changeVelocity'))
+    changeVelocityCommand(ids, clamped, commandLabel('changeVelocity'))
   );
 }
 
@@ -1104,6 +1073,17 @@ export function changeAccidental<T extends EditingState>(
   if (!state.score) return;
   const ids = selectedNoteIds(state.score, state.selection);
   if (ids.length === 0) return;
+  // An accidental moves the pitch a semitone or two, and so can take a note
+  // past the instrument like any other pitch change.
+  const score = state.score;
+  const changes = ids.flatMap(id => {
+    const event = findEvent(score, id);
+    return event && isNoteEvent(event)
+      ? [{ id, to: { ...event.pitch, accidental } }]
+      : [];
+  });
+  if (refuseOutOfRangeChanges(store, score, changes, 'changeAccidental'))
+    return;
   dispatchTracked(
     store,
     changeAccidentalCommand(ids, accidental, commandLabel('changeAccidental'))
@@ -1231,18 +1211,32 @@ export function toggleGlissando<T extends EditingState>(
   );
 }
 
-/** Sets or clears the finger written on the selected notes. */
+/**
+ * Sets or clears the finger written on the selected notes.
+ *
+ * Trimmed, and blank clears — a field left holding a space must not store a
+ * finger that draws as nothing. When every selected note already carries the
+ * result, nothing is written: a field blurred without an edit is not an undo
+ * entry.
+ */
 export function setFingering<T extends EditingState>(
   store: EditorStoreApi<T>,
   fingering: string | undefined
 ): void {
   const state = store.getState();
-  if (!state.score) return;
-  const ids = selectedNoteIds(state.score, state.selection);
+  const score = state.score;
+  if (!score) return;
+  const ids = selectedNoteIds(score, state.selection);
   if (ids.length === 0) return;
+  const next = fingering?.trim() || undefined;
+  const unchanged = ids.every(id => {
+    const event = findEvent(score, id);
+    return event && isNoteEvent(event) && event.fingering === next;
+  });
+  if (unchanged) return;
   dispatchTracked(
     store,
-    setFingeringCommand(ids, fingering, commandLabel('setFingering'))
+    setFingeringCommand(ids, next, commandLabel('setFingering'))
   );
 }
 
@@ -1900,15 +1894,33 @@ export function setNotePitch<T extends EditingState>(
     fifths: 0,
     mode: 'major',
   };
+  // The octave the panel may name, clamped rather than refused, the way every
+  // numeric field treats a value past its end. The native field clamped to
+  // -1..9 and the web one did not clamp at all.
+  if (!Number.isFinite(edited.octave)) return;
+  const bounded: Pitch = {
+    ...edited,
+    octave: Math.max(
+      MIN_OCTAVE,
+      Math.min(MAX_OCTAVE, Math.round(edited.octave))
+    ),
+  };
   const next =
     pitchDisplay === 'written' && track
-      ? soundingPitchForTrack(edited, track, key)
-      : edited;
+      ? soundingPitchForTrack(bounded, track, key)
+      : bounded;
   // Against `next`, never `edited`: on a B-flat trumpet read in written pitch
   // the two differ by a tone, and the compass is a sounding one. Checking what
   // was typed would refuse a written D#6 the instrument plays and accept a
   // written E3 it cannot reach.
-  if (refuseOutOfRange(store, track, [next], 'so the note was not changed.'))
+  if (
+    refuseOutOfRangeChanges(
+      store,
+      score,
+      [{ id: noteId, to: next }],
+      'changeNote'
+    )
+  )
     return;
   dispatchTracked(
     store,
@@ -1931,6 +1943,23 @@ export function relocateNotes<T extends EditingState>(
   target: RelocateNotesParams
 ): void {
   if (ids.length === 0) return;
+  const score = store.getState().score;
+  if (score) {
+    const destination = findTrack(score, target.targetTrackId);
+    // Only notes changing part are new to its instrument; moving an imported
+    // low note along its own part in time writes nothing it did not have.
+    const arriving = ids
+      .map(id => findEvent(score, id))
+      .filter(
+        (event): event is NoteEvent =>
+          event !== null &&
+          isNoteEvent(event) &&
+          event.trackId !== target.targetTrackId
+      )
+      .map(note => note.pitch);
+    if (refuseOutOfRangeArrival(store, destination, arriving, 'moveNotes'))
+      return;
+  }
   dispatchTracked(
     store,
     relocateNotesCommand([...ids], target, commandLabel('relocateNotes'))
@@ -1957,12 +1986,15 @@ export function commitPitchDrag<T extends EditingState>(
   // `from` is the note's stored pitch, so `dragged` is already sounding. The
   // drag is refused whole rather than stopped at the edge: a drag that stuck at
   // the top of the compass would read as the pointer being ignored.
-  const event = score ? findEvent(score, noteId) : null;
-  const track =
-    score && event && isNoteEvent(event)
-      ? findTrack(score, event.trackId)
-      : null;
-  if (refuseOutOfRange(store, track, [dragged], 'so the note was not moved.'))
+  if (
+    score &&
+    refuseOutOfRangeChanges(
+      store,
+      score,
+      [{ id: noteId, to: dragged }],
+      'moveNote'
+    )
+  )
     return;
   dispatchTracked(
     store,
@@ -2071,12 +2103,30 @@ export function clearGraceNotes<T extends EditingState>(
  * the person doing it: choosing 6/8 for a selection of bars is a single
  * decision, and a caller that looped would be a caller that could get the
  * loop subtly different.
+ *
+ * Refuses a signature the model cannot store — a denominator outside
+ * `TIME_SIG_DENOMINATOR_OPTIONS`, or a numerator that is not a whole number in
+ * 1..`MAX_TIME_SIG_NUMERATOR` — rather than writing a bar the validator then
+ * complains about. There is no nearest denominator to snap to, so a host
+ * parses the numerator with `parseNumericDraft` and offers the denominators as
+ * a picker. Returns whether it was applied.
  */
 export function setTimeSignature<T extends EditingState>(
   store: EditorStoreApi<T>,
   measureIds: readonly UUID[],
   timeSignature: TimeSignature
-): void {
+): boolean {
+  const { numerator, denominator } = timeSignature;
+  if (
+    !(TIME_SIG_DENOMINATOR_OPTIONS as readonly number[]).includes(
+      denominator
+    ) ||
+    !Number.isInteger(numerator) ||
+    numerator < 1 ||
+    numerator > MAX_TIME_SIG_NUMERATOR
+  )
+    return false;
+  if (measureIds.length === 0) return false;
   for (const id of measureIds) {
     dispatchTracked(
       store,
@@ -2087,6 +2137,7 @@ export function setTimeSignature<T extends EditingState>(
       )
     );
   }
+  return true;
 }
 
 /** The same, for the key. */

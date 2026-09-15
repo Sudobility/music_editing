@@ -29,6 +29,7 @@ import {
   cutWouldPrompt,
   defaultInsertPitch,
   deleteSelected,
+  dispatchTracked,
   displayedPitchForNote,
   duplicateSelected,
   exportScopeNeedsPrompt,
@@ -562,12 +563,27 @@ describe('dispatchTracked', () => {
     const noteId = allNotes(store.getState().score!)[0].id;
     expect(store.getState().toasts).toEqual([]);
 
-    // changeVelocity(store, 500) goes through dispatchTracked and produces an
-    // out-of-range (0-127) velocity -> INVALID_VELOCITY validation error.
-    store
-      .getState()
-      .setSelection({ eventIds: [noteId], measureIds: [], trackIds: [] });
-    changeVelocity(store, 500);
+    // An out-of-range (0-127) velocity -> INVALID_VELOCITY validation error.
+    // Forced through a transform: `changeVelocity` itself clamps now, so it can
+    // no longer be the way to produce one.
+    dispatchTracked(
+      store,
+      transformCommand('Force invalid velocity', score => ({
+        ...score,
+        tracks: score.tracks.map(t => ({
+          ...t,
+          measures: t.measures.map(m => ({
+            ...m,
+            voices: m.voices.map(v => ({
+              ...v,
+              events: v.events.map(e =>
+                e.id === noteId ? { ...e, velocity: 500 } : e
+              ),
+            })),
+          })),
+        })),
+      }))
+    );
 
     expect(store.getState().toasts).toHaveLength(1);
     expect(store.getState().toasts[0].severity).toBe('error');

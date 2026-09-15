@@ -10,8 +10,10 @@
  * duplicated in the app once and got at least one of them wrong.
  *
  * So they live here as actions, and the panel calls them with the value its
- * control produced. Each takes its undo `label` from the caller, for the same
- * reason every command does: this library holds no user-facing words.
+ * control produced. Each names its own undo entry through `commandLabel` — the
+ * host's copy, since this library holds no user-facing words — so the two apps
+ * cannot label the same edit differently. A `label` argument still overrides
+ * it, for a caller that has a reason to.
  *
  * These are conveniences over `dispatchCommand`, not a way around it — they all
  * go through it, so the edit lock (no content changes while the transport
@@ -29,7 +31,9 @@ import {
   fitShiftForInstrument,
 } from '@sudobility/music_types';
 import { instrumentChoiceFor } from '@sudobility/music_types';
+import { clampPan, clampVolume, quantizeMix } from '@sudobility/music_types';
 import type { EditingState, SliceArgs } from '../editing-store.js';
+import { commandLabel } from '../../services/editing/copy.js';
 
 /** The mixing properties, which stay editable while the transport plays. */
 export type TrackMixPatch = Partial<
@@ -49,8 +53,12 @@ export type TrackInstrumentResult =
   | { ok: false; reason: 'noTrack' };
 
 export type TrackSlice = {
-  /** Renames a track. Trimmed, and a blank name is refused rather than stored. */
-  renameTrack: (trackId: UUID, name: string, label: string) => void;
+  /**
+   * Renames a track. Trimmed; a blank name, an unknown track and a name equal
+   * to the current one are refused rather than stored. Returns whether it
+   * wrote — so a field blurred without an edit puts nothing on the history.
+   */
+  renameTrack: (trackId: UUID, name: string, label?: string) => boolean;
 
   /**
    * Sets the instrument from a catalogue value — the string an
@@ -67,13 +75,19 @@ export type TrackSlice = {
   setTrackInstrument: (
     trackId: UUID,
     value: string,
-    label: string
+    label?: string
   ) => TrackInstrumentResult;
 
-  setTrackClef: (trackId: UUID, clef: Clef, label: string) => void;
+  setTrackClef: (trackId: UUID, clef: Clef, label?: string) => void;
 
-  /** Volume, pan, mute and solo — `kind: 'mix'`, so these work while playing. */
-  setTrackMix: (trackId: UUID, patch: TrackMixPatch, label: string) => void;
+  /**
+   * Volume, pan, mute and solo — `kind: 'mix'`, so these work while playing.
+   *
+   * Volume is clamped to 0-1 and pan to -1..1, and both are snapped onto
+   * `MIX_STEP`: a slider's float arithmetic otherwise stores 0.07000000001 and
+   * round-trips it through the project that way.
+   */
+  setTrackMix: (trackId: UUID, patch: TrackMixPatch, label?: string) => void;
 
   /**
    * Deletes a track, unless it is the last one.
@@ -83,7 +97,7 @@ export type TrackSlice = {
    * ahead, and `canDeleteTrack` answers the same question ahead of time so an
    * affordance can be disabled rather than failing on click.
    */
-  removeTrack: (trackId: UUID, label: string) => boolean;
+  removeTrack: (trackId: UUID, label?: string) => boolean;
   canDeleteTrack: () => boolean;
 
   /**
@@ -96,9 +110,11 @@ export type TrackSlice = {
    * write this.
    *
    * A blank title is refused for the same reason a blank track name is —
-   * everything downstream uses it as a filename.
+   * everything downstream uses it as a filename. Fields equal (after trimming)
+   * to what the score already holds are dropped, and a patch with nothing left
+   * writes nothing. Returns whether it wrote.
    */
-  setScoreMetadata: (patch: ScoreMetadataPatch, label: string) => void;
+  setScoreMetadata: (patch: ScoreMetadataPatch, label?: string) => boolean;
 };
 
 /** The metadata fields a user can edit. `createdAt` is the score's, not theirs. */
@@ -111,15 +127,22 @@ export type ScoreMetadataPatch = {
 export const createTrackSlice = <T extends EditingState>({
   get,
 }: SliceArgs<T>): TrackSlice => ({
-  renameTrack: (trackId, name, label) => {
+  renameTrack: (trackId, name, label = commandLabel('changeTrackProps')) => {
     const trimmed = name.trim();
-    if (trimmed === '') return;
+    if (trimmed === '') return false;
+    const track = get().score?.tracks.find(t => t.id === trackId);
+    if (!track || track.name === trimmed) return false;
     get().dispatchCommand(
       changeTrackPropsCommand(trackId, { name: trimmed }, label)
     );
+    return true;
   },
 
-  setTrackInstrument: (trackId, value, label) => {
+  setTrackInstrument: (
+    trackId,
+    value,
+    label = commandLabel('changeTrackProps')
+  ) => {
     const { score, dispatchCommand } = get();
     if (!score) return { ok: false, reason: 'noTrack' };
 
@@ -164,11 +187,15 @@ export const createTrackSlice = <T extends EditingState>({
     return { ok: true };
   },
 
-  setTrackClef: (trackId, clef, label) => {
+  setTrackClef: (trackId, clef, label = commandLabel('changeClef')) => {
     get().dispatchCommand(changeClefCommand(trackId, clef, label));
   },
 
-  setTrackMix: (trackId, patch, label) => {
+  setTrackMix: (trackId, input, label = commandLabel('changeTrackProps')) => {
+    const patch: TrackMixPatch = { ...input };
+    if (input.volume !== undefined)
+      patch.volume = clampVolume(quantizeMix(input.volume));
+    if (input.pan !== undefined) patch.pan = clampPan(quantizeMix(input.pan));
     get().dispatchCommand(changeTrackPropsCommand(trackId, patch, label));
 
     /*
@@ -199,7 +226,7 @@ export const createTrackSlice = <T extends EditingState>({
     get().setActiveTrack(trackId);
   },
 
-  removeTrack: (trackId, label) => {
+  removeTrack: (trackId, label = commandLabel('deleteTrack')) => {
     if (!get().canDeleteTrack()) return false;
     get().dispatchCommand(deleteTrackCommand(trackId, label));
     return true;
@@ -207,17 +234,27 @@ export const createTrackSlice = <T extends EditingState>({
 
   canDeleteTrack: () => (get().score?.tracks.length ?? 0) > 1,
 
-  setScoreMetadata: (patch, label) => {
+  setScoreMetadata: (patch, label = commandLabel('changeMetadata')) => {
+    const metadata = get().score?.metadata;
+    if (!metadata) return false;
     const trimmed: ScoreMetadataPatch = {};
     if (patch.title !== undefined) {
       const title = patch.title.trim();
-      if (title === '') return;
-      trimmed.title = title;
+      if (title === '') return false;
+      if (title !== metadata.title) trimmed.title = title;
     }
-    if (patch.composer !== undefined) trimmed.composer = patch.composer.trim();
-    if (patch.description !== undefined)
-      trimmed.description = patch.description.trim();
+    if (patch.composer !== undefined) {
+      const composer = patch.composer.trim();
+      if (composer !== (metadata.composer ?? '')) trimmed.composer = composer;
+    }
+    if (patch.description !== undefined) {
+      const description = patch.description.trim();
+      if (description !== (metadata.description ?? ''))
+        trimmed.description = description;
+    }
+    if (Object.keys(trimmed).length === 0) return false;
 
     get().dispatchCommand(changeMetadataCommand(trimmed, label));
+    return true;
   },
 });

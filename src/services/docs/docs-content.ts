@@ -236,3 +236,8 @@ export function docsTopic(
 ): (DocsTopic & { group: DocsGroup }) | null {
   return DOCS_TOPICS.find(t => t.id === id) ?? null;
 }
+
+/** The i18n key a docs group's heading is written under. */
+export function docsGroupLabelKey(group: DocsGroup): string {
+  return `docs.group.${group}`;
+}

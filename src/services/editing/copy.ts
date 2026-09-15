@@ -87,12 +87,77 @@ export type EditingCopy = {
   validationProblem: (detail: string) => string;
   /** Refusing to delete a track's only measure. */
   lastMeasureKept: string;
+  /**
+   * A note the instrument cannot play was refused.
+   *
+   * Facts rather than a sentence: the pitch, the instrument, its compass, which
+   * side of it the note fell and what was being attempted. Every one of those
+   * used to be spliced into an English string here, so a Chinese reader was
+   * told in English why the note they played did not appear — and the order
+   * of the parts ("C2 is below Violin's range") is itself a fact about English.
+   */
+  outOfRange: (detail: OutOfRangeCopy) => string;
+  /** A chord was refused because the instrument plays fewer notes at once. */
+  tooManyNotes: (detail: PolyphonyCopy) => string;
+  /**
+   * The label on a toast's Undo button.
+   *
+   * Offered where a refusal leaves somebody's music only in the undo history —
+   * a paste refused after a cut, whose notes are no longer anywhere else.
+   */
+  undoAction: () => string;
+};
+
+/**
+ * What an edit that was refused had been about to do.
+ *
+ * The tail of the sentence — "so it was not added", "so nothing was pasted" —
+ * and a closed list so a host's copy table fails to compile when a new route
+ * starts refusing, rather than printing a key.
+ */
+export const REFUSED_EDITS = [
+  'addNote',
+  'addChord',
+  'changeNote',
+  'changeAccidental',
+  'moveNote',
+  'moveNotes',
+  'transpose',
+  'paste',
+] as const;
+
+export type RefusedEdit = (typeof REFUSED_EDITS)[number];
+
+/** Which side of an instrument's compass a refused pitch fell. */
+export type RangeDirection = 'above' | 'below';
+
+export type OutOfRangeCopy = {
+  /** The refused sounding pitch, written as `pitchToString` writes it: `C#2`. */
+  pitch: string;
+  /** The track's instrument name, as the catalogue spells it. */
+  instrument: string;
+  /** The compass's lowest and highest sounding pitches, written the same way. */
+  low: string;
+  high: string;
+  direction: RangeDirection;
+  refused: RefusedEdit;
+};
+
+export type PolyphonyCopy = {
+  /** `null` when the target track could not be resolved. */
+  instrument: string | null;
+  /** How many notes the instrument plays at once; 1 is a monophonic part. */
+  limit: number;
+  refused: RefusedEdit;
 };
 
 let copy: EditingCopy = {
   commandLabel: () => '',
   validationProblem: () => '',
   lastMeasureKept: '',
+  outOfRange: () => '',
+  tooManyNotes: () => '',
+  undoAction: () => '',
 };
 
 /** Called once at bootstrap by the host application. */

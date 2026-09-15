@@ -4,6 +4,9 @@ import { testEditingStore } from '../../test/store.js';
 import { pitchToMidi } from '@sudobility/music_types';
 import { isNoteEvent } from '@sudobility/music_types';
 import type { Score, Track } from '@sudobility/music_types';
+import { editingCopy, setEditingCopy } from '../../services/editing/copy.js';
+
+const original = editingCopy();
 
 function makeStore(score: Score = twinkleScore()) {
   const store = testEditingStore();
@@ -34,6 +37,50 @@ describe('track-slice', () => {
     const track = store.getState().score!.tracks[0];
     store.getState().renameTrack(track.id, '   ', 'Rename');
     expect(store.getState().score!.tracks[0].name).toBe(track.name);
+  });
+
+  it('renameTrack skips an unchanged name and reports whether it wrote', () => {
+    const store = makeStore();
+    const track = store.getState().score!.tracks[0];
+    const before = store.getState().score;
+    expect(store.getState().renameTrack(track.id, ` ${track.name} `)).toBe(
+      false
+    );
+    expect(store.getState().renameTrack(track.id, '   ')).toBe(false);
+    expect(store.getState().renameTrack('missing', 'Lead')).toBe(false);
+    expect(store.getState().score).toBe(before);
+    expect(store.getState().renameTrack(track.id, 'Lead')).toBe(true);
+  });
+
+  it('track actions name their undo entries from the host copy', () => {
+    const store = makeStore(twoTrackScore());
+    const [first, second] = store.getState().score!.tracks;
+    setEditingCopy({ ...editingCopy(), commandLabel: key => `label:${key}` });
+    try {
+      store.getState().renameTrack(first.id, 'Lead');
+      expect(store.getState().undoLabel).toBe('label:changeTrackProps');
+      store.getState().setTrackClef(first.id, 'bass');
+      expect(store.getState().undoLabel).toBe('label:changeClef');
+      store.getState().setTrackMix(first.id, { volume: 0.5 });
+      expect(store.getState().undoLabel).toBe('label:changeTrackProps');
+      store.getState().setTrackInstrument(first.id, '40');
+      expect(store.getState().undoLabel).toBe('label:changeTrackProps');
+      store.getState().removeTrack(second.id);
+      expect(store.getState().undoLabel).toBe('label:deleteTrack');
+    } finally {
+      setEditingCopy(original);
+    }
+  });
+
+  it('setTrackMix snaps volume and pan onto the mixer grid and into range', () => {
+    const store = makeStore();
+    const track = store.getState().score!.tracks[0];
+    store.getState().setTrackMix(track.id, { volume: 0.07000000001, pan: 3 });
+    expect(store.getState().score!.tracks[0].volume).toBe(0.07);
+    expect(store.getState().score!.tracks[0].pan).toBe(1);
+    store.getState().setTrackMix(track.id, { volume: 9, pan: -0.333333 });
+    expect(store.getState().score!.tracks[0].volume).toBe(1);
+    expect(store.getState().score!.tracks[0].pan).toBe(-0.33);
   });
 
   it('sets the program and the stored name together', () => {
@@ -258,6 +305,38 @@ describe('track-slice', () => {
       expect(store.getState().score!.metadata.composer).toBe('Trad.');
       expect(store.getState().score!.metadata.title).toBe('Air');
       expect(title).toBeTruthy();
+    });
+
+    it('skips a patch that changes nothing, and says whether it wrote', () => {
+      // A field blurred without an edit must not put an entry on the undo
+      // history — the panels each checked this themselves, differently.
+      const store = makeStore();
+      store.getState().setScoreMetadata({ title: 'Air', composer: 'Trad.' });
+      const before = store.getState().score;
+      expect(
+        store
+          .getState()
+          .setScoreMetadata({ title: ' Air ', composer: 'Trad. ' })
+      ).toBe(false);
+      expect(store.getState().setScoreMetadata({ title: '  ' })).toBe(false);
+      expect(store.getState().score).toBe(before);
+      expect(store.getState().setScoreMetadata({ composer: 'Bach' })).toBe(
+        true
+      );
+    });
+
+    it('labels its undo entry itself when not given one', () => {
+      const store = makeStore();
+      setEditingCopy({
+        ...editingCopy(),
+        commandLabel: key => `label:${key}`,
+      });
+      try {
+        store.getState().setScoreMetadata({ title: 'Named' });
+        expect(store.getState().undoLabel).toBe('label:changeMetadata');
+      } finally {
+        setEditingCopy(original);
+      }
     });
 
     it('is undoable, like any other score change', () => {

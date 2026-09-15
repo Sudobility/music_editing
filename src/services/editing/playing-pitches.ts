@@ -15,7 +15,11 @@
  * reason it is wrong: a lit key is meant to say "this is what you are hearing
  * on the part you are reading".
  */
-import type { SoundingNote, UUID } from '@sudobility/music_types';
+import type {
+  SoundingNote,
+  TransportState,
+  UUID,
+} from '@sudobility/music_types';
 
 export function playingPitchesForTrack(
   sounding: readonly SoundingNote[],
@@ -29,4 +33,28 @@ export function playingPitchesForTrack(
     if (note.trackId === trackId) pitches.add(note.midi);
   }
   return pitches;
+}
+
+/**
+ * Every key the keyboard should draw pressed.
+ *
+ * The active track's sounding pitches — **only while playing** — plus the keys
+ * a finger is holding. Gated on the transport rather than on the set being
+ * non-empty because the engine clears sounding notes on `stop()` but not on
+ * `pause()`, so without the gate a pause left whatever was mid-chord stuck
+ * lit. The web keyboard had that gate and the held keys; the native keyboard
+ * had neither, so a paused chord stayed lit and a held key did not show.
+ */
+export function litKeys(
+  sounding: readonly SoundingNote[],
+  activeTrackId: UUID | null,
+  transportState: TransportState,
+  held: Iterable<number>
+): Set<number> {
+  const lit =
+    transportState === 'playing'
+      ? playingPitchesForTrack(sounding, activeTrackId)
+      : new Set<number>();
+  for (const midi of held) lit.add(midi);
+  return lit;
 }

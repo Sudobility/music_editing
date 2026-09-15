@@ -20,6 +20,7 @@ import type {
 import {
   caretToBarEdge,
   caretToScoreEdge,
+  chooseDuration,
   deleteSelected,
   insertNoteAtCaret,
   insertRestAtSelection,
@@ -42,6 +43,8 @@ import {
   pitchForLetter,
 } from '../../domain/notation/note-entry.js';
 import { withModifier } from '@sudobility/music_types';
+import { selectToolbarAvailability } from './toolbar.js';
+import type { ToolbarControl } from './toolbar.js';
 
 /**
  * One keypress, platform-free.
@@ -72,14 +75,29 @@ export type EditorShortcutHost = {
   requestPaste?: () => void;
 };
 
-/** Marks on Shift — the one modifier left, since letters are note entry and digits are note values. */
-const SHIFT_MARKS: Record<string, (store: EditingStoreApi) => void> = {
-  F: store => toggleFermata(store),
-  A: store => toggleArpeggiate(store),
-  G: store => toggleGlissando(store),
-  O: store => toggleOttava(store, '8va'),
-  '<': store => toggleHairpin(store, 'crescendo'),
-  '>': store => toggleHairpin(store, 'diminuendo'),
+/**
+ * Marks on Shift — the one modifier left, since letters are note entry and
+ * digits are note values. Each names the toolbar control it stands in for, so
+ * a key is available exactly when its button is.
+ */
+const SHIFT_MARKS: Record<
+  string,
+  { control: ToolbarControl; run: (store: EditingStoreApi) => void }
+> = {
+  F: { control: 'fermata', run: store => toggleFermata(store) },
+  A: { control: 'arpeggiate', run: store => toggleArpeggiate(store) },
+  G: { control: 'glissando', run: store => toggleGlissando(store) },
+  // No button of its own; an octave bracket is a span, so it takes the slur's
+  // rule of two notes.
+  O: { control: 'slur', run: store => toggleOttava(store, '8va') },
+  '<': {
+    control: 'crescendo',
+    run: store => toggleHairpin(store, 'crescendo'),
+  },
+  '>': {
+    control: 'diminuendo',
+    run: store => toggleHairpin(store, 'diminuendo'),
+  },
 };
 
 /**
@@ -111,6 +129,17 @@ export function runEditorShortcut<T extends EditingState>(
   host: EditorShortcutHost = {}
 ): boolean {
   const state = store.getState();
+  /*
+    A key stands in for a toolbar control, so it is available exactly when that
+    control is. An unavailable key is still *claimed* — returned `true` — so a
+    letter pressed during playback does not fall through to the page and type
+    into whatever the browser focuses next; it simply does nothing.
+  */
+  const available = selectToolbarAvailability(state);
+  const when = (control: ToolbarControl, run: () => void): true => {
+    if (available[control]) run();
+    return true;
+  };
 
   if (chord.key === ' ') {
     host.togglePlay?.();
@@ -178,52 +207,40 @@ export function runEditorShortcut<T extends EditingState>(
 
   if (chord.shift && !chord.mod && !chord.alt) {
     const mark = SHIFT_MARKS[chord.key];
-    if (mark) {
-      mark(store);
-      return true;
-    }
+    if (mark) return when(mark.control, () => mark.run(store));
   }
 
   // Everything below is note entry, and none of it takes a modifier — so a
   // shortcut belonging to the host passing through is never mistaken for a note.
   if (chord.mod || chord.alt) return false;
 
+  // A digit is the note-value button: it arms the next note *and* retimes the
+  // selection, which is what `chooseDuration` means. Arming alone made the key
+  // and the button two different controls.
   const digitDuration = durationForDigit(chord.key, state.snapGrid);
-  if (digitDuration) {
-    state.setSnapGrid(digitDuration);
-    return true;
-  }
+  if (digitDuration)
+    return when('noteDuration', () => chooseDuration(store, digitDuration));
 
   // Letters write that pitch at the caret, in the octave nearest the note
   // before it, and step the caret past what was written.
-  if (isPitchLetter(chord.key)) {
-    insertNoteAtCaret(store, pitchForLetter(store, chord.key), {
-      advanceCaret: true,
-    });
-    return true;
-  }
+  if (isPitchLetter(chord.key))
+    return when('insertNote', () =>
+      insertNoteAtCaret(store, pitchForLetter(store, chord.key), {
+        advanceCaret: true,
+      })
+    );
 
   const letter = chord.key.toLowerCase();
-  if (letter === 'n') {
-    state.setNoteInput(!state.noteInput);
-    return true;
-  }
-  if (chord.key === '.') {
-    state.setSnapGrid(withModifier(state.snapGrid, 'dotted'));
-    return true;
-  }
-  if (letter === 'r') {
-    insertRestAtSelection(store);
-    return true;
-  }
-  if (letter === 's') {
-    toggleSlur(store);
-    return true;
-  }
-  if (letter === 't') {
-    toggleTie(store, 'tieStart');
-    return true;
-  }
+  if (letter === 'n')
+    return when('noteInput', () => state.setNoteInput(!state.noteInput));
+  if (chord.key === '.')
+    return when('dotted', () =>
+      chooseDuration(store, withModifier(state.snapGrid, 'dotted'))
+    );
+  if (letter === 'r')
+    return when('insertRest', () => insertRestAtSelection(store));
+  if (letter === 's') return when('slur', () => toggleSlur(store));
+  if (letter === 't') return when('tie', () => toggleTie(store, 'tieStart'));
 
   if (chord.key === 'ArrowUp') {
     if (chord.shift) transposeOctave(store, 1);

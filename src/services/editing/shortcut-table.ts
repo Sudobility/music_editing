@@ -120,3 +120,15 @@ export const SHORTCUTS: ReadonlyArray<ShortcutRow & { group: ShortcutGroup }> =
       actionKey: 'shortcuts.addRemoveNote',
     },
   ];
+
+/**
+ * The i18n key a shortcut group's heading is written under.
+ *
+ * A function rather than a template at each call site: the native shortcuts
+ * screen built `shortcuts.<group>` — a key neither locale has — and so printed
+ * the key itself as every heading, while the web docs page read
+ * `docs.shortcuts.group.<group>`, which both locales do have.
+ */
+export function shortcutGroupLabelKey(group: ShortcutGroup): string {
+  return `docs.shortcuts.group.${group}`;
+}

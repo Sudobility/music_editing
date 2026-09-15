@@ -6,7 +6,7 @@
  * selected" and "what's on the clipboard" are tightly coupled (paste needs
  * to know where the current selection implies content should land).
  */
-import { allNotes, findEvent } from '@sudobility/music_types';
+import { allNotes, findEvent, findTrack } from '@sudobility/music_types';
 import { selectionToRange } from '@sudobility/music_types';
 import { emptySelection } from '@sudobility/music_types';
 import type { ScoreSelection } from '@sudobility/music_types';
@@ -30,7 +30,8 @@ import {
   replaceMeasuresCommand,
   replaceTrackCommand,
 } from '@sudobility/music_types';
-import { commandLabel } from '../../services/editing/copy.js';
+import { commandLabel, editingCopy } from '../../services/editing/copy.js';
+import { refuseOutOfRangeArrival } from '../../services/editing/range-refusal.js';
 import { selectionKind } from '../../services/editing/selection-kind.js';
 import { closeGap, makeRoom } from '@sudobility/music_types';
 import { transformCommand } from '@sudobility/music_types';
@@ -51,10 +52,21 @@ import { getMusicSelectionSource } from '../../services/selection/singleton.js';
  * lets insert and replace put a slice back without leaving the parts
  * disagreeing about where bar 40 is.
  */
-export type ClipboardData =
+export type ClipboardData = (
   | { kind: 'notes'; events: NoteEvent[]; anchorTick: number }
   | { kind: 'measures'; slice: MeasureSlice; count: number }
-  | { kind: 'track'; track: Track };
+  | { kind: 'track'; track: Track }
+) & {
+  /**
+   * Whether the clipboard was filled by a cut rather than a copy.
+   *
+   * It matters only when a paste is refused: after a copy the music is still
+   * where it was, but after a cut it exists nowhere except the clipboard and
+   * the undo history, so the refusal offers Undo. Absent reads as a copy, so a
+   * clipboard built by hand elsewhere needs no change.
+   */
+  fromCut?: boolean;
+};
 
 export type SelectionSlice = {
   selection: ScoreSelection;
@@ -160,6 +172,7 @@ function clipboardFor(
       kind: 'notes',
       events,
       anchorTick: Math.min(...events.map(e => e.startTick)),
+      fromCut: false,
     };
   }
   if (kind === 'measures') {
@@ -170,11 +183,11 @@ function clipboardFor(
     const from = indices[0] as number;
     const to = (indices[indices.length - 1] as number) + 1;
     const slice = sliceOf(score, from, to);
-    return { kind: 'measures', slice, count: slice.count };
+    return { kind: 'measures', slice, count: slice.count, fromCut: false };
   }
   if (kind === 'track') {
     const track = score.tracks.find(t => t.id === selection.trackIds[0]);
-    return track ? { kind: 'track', track } : null;
+    return track ? { kind: 'track', track, fromCut: false } : null;
   }
   return null;
 }
@@ -205,145 +218,171 @@ function resolvePasteTrackId(
 export const createSelectionSlice = <T extends EditingState>({
   set,
   get,
-}: SliceArgs<T>): SelectionSlice => ({
-  selection: emptySelection(),
-  selectionRegenerated: false,
-  clipboard: null,
+}: SliceArgs<T>): SelectionSlice => {
+  /*
+    The score a cut left behind, while nothing has been done since.
 
-  /** Selects notes a generation just wrote, and marks them as such. */
-  selectRegenerated: eventIds => {
-    set(state => {
-      state.selection = {
-        eventIds: [...eventIds],
-        measureIds: [],
-        trackIds: [],
-      };
-      state.selectionRegenerated = eventIds.length > 0;
-    });
-  },
+    A refused paste offers Undo only when undoing would reverse *the cut*. Once
+    any other edit has landed, the top of the history is that edit, and a
+    button promising to bring the notes back would take something else away
+    instead. Held in the closure rather than the state: it is bookkeeping for
+    one rule, and nothing should render from it or persist it.
+  */
+  let scoreAfterCut: Score | null = null;
 
-  setSelection: selection => {
-    set(state => {
-      state.selection = selection;
-      state.selectionRegenerated = false;
-    });
-    // The one write path, so this is where `IMusicSelection` is told. Every
-    // other selection action in this slice routes through here — toggling a
-    // note, selecting measures, clicking a track, clearing — which is what
-    // makes a single report enough to keep the shared selection exact.
-    getMusicSelectionSource().setSelection(selection);
-    // Routed through the observer (rather than this slice writing another
-    // slice's field) so whoever owns that field stays the only code that
-    // touches it — and optional, because a store with no AI generation in it
-    // has nothing to keep in step.
-    get().syncModeFromSelection?.(selection);
-  },
+  return {
+    selection: emptySelection(),
+    selectionRegenerated: false,
+    clipboard: null,
 
-  toggleEvent: eventId => {
-    const current = get().selection;
-    const eventIds = current.eventIds.includes(eventId)
-      ? current.eventIds.filter(id => id !== eventId)
-      : [...current.eventIds, eventId];
-    get().setSelection({ ...current, eventIds });
-  },
+    /** Selects notes a generation just wrote, and marks them as such. */
+    selectRegenerated: eventIds => {
+      set(state => {
+        state.selection = {
+          eventIds: [...eventIds],
+          measureIds: [],
+          trackIds: [],
+        };
+        state.selectionRegenerated = eventIds.length > 0;
+      });
+    },
 
-  selectMeasures: measureIds => {
-    get().setSelection({ eventIds: [], measureIds, trackIds: [] });
-  },
+    setSelection: selection => {
+      set(state => {
+        state.selection = selection;
+        state.selectionRegenerated = false;
+      });
+      // The one write path, so this is where `IMusicSelection` is told. Every
+      // other selection action in this slice routes through here — toggling a
+      // note, selecting measures, clicking a track, clearing — which is what
+      // makes a single report enough to keep the shared selection exact.
+      getMusicSelectionSource().setSelection(selection);
+      // Routed through the observer (rather than this slice writing another
+      // slice's field) so whoever owns that field stays the only code that
+      // touches it — and optional, because a store with no AI generation in it
+      // has nothing to keep in step.
+      get().syncModeFromSelection?.(selection);
+    },
 
-  selectTrack: trackId => {
-    get().setSelection({ eventIds: [], measureIds: [], trackIds: [trackId] });
-  },
+    toggleEvent: eventId => {
+      const current = get().selection;
+      const eventIds = current.eventIds.includes(eventId)
+        ? current.eventIds.filter(id => id !== eventId)
+        : [...current.eventIds, eventId];
+      get().setSelection({ ...current, eventIds });
+    },
 
-  clearSelection: () => {
-    get().setSelection(emptySelection());
-  },
+    selectMeasures: measureIds => {
+      get().setSelection({ eventIds: [], measureIds, trackIds: [] });
+    },
 
-  copySelection: () => {
-    const { score, selection } = get();
-    if (!score) return;
-    const data = clipboardFor(score, selection);
-    if (!data) return;
-    set(state => {
-      state.clipboard = data;
-    });
-  },
+    selectTrack: trackId => {
+      get().setSelection({ eventIds: [], measureIds: [], trackIds: [trackId] });
+    },
 
-  cutSelection: options => {
-    const { score, selection } = get();
-    if (!score) return;
-    const kind = selectionKind(selection);
-    if (!kind) return;
+    clearSelection: () => {
+      get().setSelection(emptySelection());
+    },
 
-    // Copy first, always: cut is copy plus a removal, and a removal that
-    // happened without the copy is a delete somebody cannot undo by pasting.
-    get().copySelection();
-    if (!get().clipboard) return;
+    copySelection: () => {
+      const { score, selection } = get();
+      if (!score) return;
+      const data = clipboardFor(score, selection);
+      if (!data) return;
+      set(state => {
+        state.clipboard = data;
+      });
+    },
 
-    if (kind === 'notes') {
-      const cutNotes = selection.eventIds
-        .map(id => findEvent(score, id))
-        .filter(
-          (event): event is NoteEvent => event !== null && isNoteEvent(event)
+    cutSelection: options => {
+      const { score, selection } = get();
+      if (!score) return;
+      const kind = selectionKind(selection);
+      if (!kind) return;
+
+      // Copy first, always: cut is copy plus a removal, and a removal that
+      // happened without the copy is a delete somebody cannot undo by pasting.
+      get().copySelection();
+      if (!get().clipboard) return;
+      set(state => {
+        if (state.clipboard) state.clipboard.fromCut = true;
+      });
+
+      if (kind === 'notes') {
+        const cutNotes = selection.eventIds
+          .map(id => findEvent(score, id))
+          .filter(
+            (event): event is NoteEvent => event !== null && isNoteEvent(event)
+          );
+        if (cutNotes.length === 0) return;
+
+        // Measured before the delete, while the notes are still there to measure.
+        const trackId = cutNotes[0].trackId;
+        const sameTrack = cutNotes.every(note => note.trackId === trackId);
+        const fromTick = Math.min(...cutNotes.map(note => note.startTick));
+        const toTick = Math.max(
+          ...cutNotes.map(note => note.startTick + note.durationTicks)
         );
-      if (cutNotes.length === 0) return;
 
-      // Measured before the delete, while the notes are still there to measure.
-      const trackId = cutNotes[0].trackId;
-      const sameTrack = cutNotes.every(note => note.trackId === trackId);
-      const fromTick = Math.min(...cutNotes.map(note => note.startTick));
-      const toTick = Math.max(
-        ...cutNotes.map(note => note.startTick + note.durationTicks)
-      );
-
-      get().dispatchCommand(
-        deleteEventsCommand(
+        const remove = deleteEventsCommand(
           cutNotes.map(note => note.id),
           commandLabel('deleteEvents')
-        )
-      );
-
-      // Only for a single-track cut: sliding one track earlier while the others
-      // stay put is exactly the desynchronisation `insert` mode exists for, and
-      // doing it to several tracks at once by accident would be worse.
-      if (options?.closeGap && sameTrack) {
-        get().dispatchCommand(
-          transformCommand(commandLabel('deleteEvents'), current =>
-            closeGap(current, trackId, fromTick, toTick - fromTick)
-          )
         );
-      }
-    } else if (kind === 'measures') {
-      const indices = selectedMeasureIndices(score, selection);
-      if (indices.length === 0) return;
-      if (options?.closeGap) {
-        // Descending, so each removal cannot move the next one's index.
-        for (const index of [...indices].reverse())
+
+        // Only for a single-track cut: sliding one track earlier while the others
+        // stay put is exactly the desynchronisation `insert` mode exists for, and
+        // doing it to several tracks at once by accident would be worse.
+        //
+        // One command either way, so one undo brings the notes back. Removing
+        // and then closing the gap as two steps left the first Undo restoring a
+        // gap with nothing in it.
+        get().dispatchCommand(
+          options?.closeGap && sameTrack
+            ? transformCommand(commandLabel('deleteEvents'), current =>
+                closeGap(
+                  remove.execute(current),
+                  trackId,
+                  fromTick,
+                  toTick - fromTick
+                )
+              )
+            : remove
+        );
+      } else if (kind === 'measures') {
+        const indices = selectedMeasureIndices(score, selection);
+        if (indices.length === 0) return;
+        if (options?.closeGap) {
+          // Descending, so each removal cannot move the next one's index.
+          for (const index of [...indices].reverse())
+            get().dispatchCommand(
+              deleteMeasureCommand(index, commandLabel('deleteMeasure'))
+            );
+        } else {
           get().dispatchCommand(
-            deleteMeasureCommand(index, commandLabel('deleteMeasure'))
+            clearMeasuresCommand(
+              selection.measureIds,
+              commandLabel('clearBars')
+            )
           );
+        }
       } else {
+        const trackId = selection.trackIds[0];
+        if (!trackId) return;
         get().dispatchCommand(
-          clearMeasuresCommand(selection.measureIds, commandLabel('clearBars'))
+          options?.closeGap
+            ? deleteTrackCommand(trackId, commandLabel('deleteTrack'))
+            : clearTrackCommand(trackId, commandLabel('clearTrack'))
         );
       }
-    } else {
-      const trackId = selection.trackIds[0];
-      if (!trackId) return;
-      get().dispatchCommand(
-        options?.closeGap
-          ? deleteTrackCommand(trackId, commandLabel('deleteTrack'))
-          : clearTrackCommand(trackId, commandLabel('clearTrack'))
-      );
-    }
 
-    get().clearSelection();
-  },
+      get().clearSelection();
+      scoreAfterCut = get().score;
+    },
 
-  paste: (atTick, options) => {
-    const { score, clipboard, selection, editMode } = get();
-    if (!score || !clipboard) return;
-    /*
+    paste: (atTick, options) => {
+      const { score, clipboard, selection, editMode } = get();
+      if (!score || !clipboard) return;
+      /*
       A measure or track paste needs a target of its own kind; a note paste does
       not, and deliberately.
 
@@ -354,105 +393,135 @@ export const createSelectionSlice = <T extends EditingState>({
       `resolvePasteTrackId` has always handled every one of those cases, so
       refusing here would break the keyboard to enforce a rule about a menu.
     */
-    if (
-      clipboard.kind !== 'notes' &&
-      selectionKind(selection) !== clipboard.kind
-    )
-      return;
-
-    // Paste obeys the edit mode for the same reason entry does: pasting on top
-    // of existing music is the same question as playing on top of it, and
-    // answering it differently in the two places would be arbitrary.
-    const scope = options?.scope ?? editMode;
-
-    if (clipboard.kind === 'measures') {
-      const indices = selectedMeasureIndices(score, selection);
-      const at = indices[0];
-      if (at === undefined) return;
-      get().dispatchCommand(
-        scope === 'insert'
-          ? insertMeasuresCommand(
-              at,
-              clipboard.slice,
-              commandLabel('pasteBars')
-            )
-          : replaceMeasuresCommand(
-              at,
-              clipboard.slice,
-              commandLabel('pasteBars')
-            )
-      );
-      get().clearSelection();
-      return;
-    }
-
-    if (clipboard.kind === 'track') {
-      const targetId = selection.trackIds[0];
-      if (!targetId) return;
-      const at = score.tracks.findIndex(t => t.id === targetId);
-      if (at < 0) return;
-      get().dispatchCommand(
-        scope === 'insert'
-          ? // Before the selected part, matching what inserting bars does:
-            // the thing you pasted onto moves down, it is not overwritten.
-            insertTrackCommand(clipboard.track, at, commandLabel('pasteTrack'))
-          : replaceTrackCommand(
-              targetId,
-              clipboard.track,
-              commandLabel('pasteTrack')
-            )
-      );
-      get().clearSelection();
-      return;
-    }
-
-    if (clipboard.events.length === 0) return;
-    const trackId = resolvePasteTrackId(score, selection);
-    if (!trackId) return;
-    const anchorTick = atTick ?? clipboard.anchorTick;
-
-    // How much time the clipboard occupies, measured from its own earliest
-    // start — the same span the paste will cover once anchored.
-    const clipStart = Math.min(...clipboard.events.map(e => e.startTick));
-    const clipEnd = Math.max(
-      ...clipboard.events.map(e => e.startTick + e.durationTicks)
-    );
-    const span = clipEnd - clipStart;
-
-    if (scope === 'insert') {
-      get().dispatchCommand(
-        transformCommand(commandLabel('pasteEvents'), current =>
-          makeRoom(current, trackId, anchorTick, span)
-        )
-      );
-    } else if (scope === 'replace') {
-      // Cleared explicitly, because reflow clusters same-span notes into a
-      // chord rather than replacing them — so leaving it implicit would make
-      // replace behave as stack whenever the lengths happened to match.
-      const occupying = allNotes(get().score ?? score)
-        .filter(
-          note =>
-            note.trackId === trackId &&
-            note.startTick < anchorTick + span &&
-            note.startTick + note.durationTicks > anchorTick
-        )
-        .map(note => note.id);
-      if (occupying.length > 0)
-        get().dispatchCommand(
-          deleteEventsCommand(occupying, commandLabel('deleteEvents'))
-        );
-    }
-
-    get().dispatchCommand(
-      pasteEventsCommand(
-        clipboard.events,
-        {
-          trackId,
-          voiceIndex: 0,
-          anchorTick,
-        },
-        commandLabel('pasteEvents')
+      if (
+        clipboard.kind !== 'notes' &&
+        selectionKind(selection) !== clipboard.kind
       )
-    );
-  },
-});
+        return;
+
+      // Paste obeys the edit mode for the same reason entry does: pasting on top
+      // of existing music is the same question as playing on top of it, and
+      // answering it differently in the two places would be arbitrary.
+      const scope = options?.scope ?? editMode;
+
+      if (clipboard.kind === 'measures') {
+        const indices = selectedMeasureIndices(score, selection);
+        const at = indices[0];
+        if (at === undefined) return;
+        get().dispatchCommand(
+          scope === 'insert'
+            ? insertMeasuresCommand(
+                at,
+                clipboard.slice,
+                commandLabel('pasteBars')
+              )
+            : replaceMeasuresCommand(
+                at,
+                clipboard.slice,
+                commandLabel('pasteBars')
+              )
+        );
+        get().clearSelection();
+        return;
+      }
+
+      if (clipboard.kind === 'track') {
+        const targetId = selection.trackIds[0];
+        if (!targetId) return;
+        const at = score.tracks.findIndex(t => t.id === targetId);
+        if (at < 0) return;
+        get().dispatchCommand(
+          scope === 'insert'
+            ? // Before the selected part, matching what inserting bars does:
+              // the thing you pasted onto moves down, it is not overwritten.
+              insertTrackCommand(
+                clipboard.track,
+                at,
+                commandLabel('pasteTrack')
+              )
+            : replaceTrackCommand(
+                targetId,
+                clipboard.track,
+                commandLabel('pasteTrack')
+              )
+        );
+        get().clearSelection();
+        return;
+      }
+
+      if (clipboard.events.length === 0) return;
+      const trackId = resolvePasteTrackId(score, selection);
+      if (!trackId) return;
+      // Notes pasted onto a different part are new to its instrument, and are
+      // refused if it cannot play them, exactly as typing them would be. Notes
+      // pasted back onto the part they came from are not checked: that is a cut
+      // and paste along one part — the clipboard's version of moving notes in
+      // time — and refusing it after the cut had already removed them would
+      // lose an imported passage to a toast.
+      //
+      // After a cut the refusal offers Undo, because the notes are then nowhere
+      // but the history — and only while the cut is still the last thing done.
+      const undoCut =
+        clipboard.fromCut && scoreAfterCut !== null && scoreAfterCut === score
+          ? { label: editingCopy().undoAction(), onClick: () => get().undo() }
+          : undefined;
+      if (
+        refuseOutOfRangeArrival(
+          { getState: get },
+          findTrack(score, trackId),
+          clipboard.events
+            .filter(event => event.trackId !== trackId)
+            .map(event => event.pitch),
+          'paste',
+          undoCut
+        )
+      )
+        return;
+      const anchorTick = atTick ?? clipboard.anchorTick;
+
+      // How much time the clipboard occupies, measured from its own earliest
+      // start — the same span the paste will cover once anchored.
+      const clipStart = Math.min(...clipboard.events.map(e => e.startTick));
+      const clipEnd = Math.max(
+        ...clipboard.events.map(e => e.startTick + e.durationTicks)
+      );
+      const span = clipEnd - clipStart;
+
+      if (scope === 'insert') {
+        get().dispatchCommand(
+          transformCommand(commandLabel('pasteEvents'), current =>
+            makeRoom(current, trackId, anchorTick, span)
+          )
+        );
+      } else if (scope === 'replace') {
+        // Cleared explicitly, because reflow clusters same-span notes into a
+        // chord rather than replacing them — so leaving it implicit would make
+        // replace behave as stack whenever the lengths happened to match.
+        const occupying = allNotes(get().score ?? score)
+          .filter(
+            note =>
+              note.trackId === trackId &&
+              note.startTick < anchorTick + span &&
+              note.startTick + note.durationTicks > anchorTick
+          )
+          .map(note => note.id);
+        if (occupying.length > 0)
+          get().dispatchCommand(
+            deleteEventsCommand(occupying, commandLabel('deleteEvents'))
+          );
+      }
+
+      get().dispatchCommand(
+        pasteEventsCommand(
+          clipboard.events,
+          {
+            trackId,
+            voiceIndex: 0,
+            anchorTick,
+          },
+          commandLabel('pasteEvents')
+        )
+      );
+    },
+  };
+};

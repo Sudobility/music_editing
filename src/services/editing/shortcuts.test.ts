@@ -6,9 +6,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  findEvent,
   getMusicPosition,
   getMusicPositionSource,
+  isNoteEvent,
   resetMusicPosition,
+  ticksFor,
 } from '@sudobility/music_types';
 import { testEditingStore } from '../../test/store.js';
 import { twinkleScore } from '@sudobility/music_types/test';
@@ -169,5 +172,43 @@ describe('runEditorShortcut', () => {
 
     runEditorShortcut(store, chord({ key: '.' }));
     expect(store.getState().snapGrid).not.toBe(chosen);
+  });
+
+  it('retimes the selection from a digit and a dot, as the toolbar does', () => {
+    // A digit is the keyboard's note-value button, and that button does two
+    // things: arms the next note and retimes what is selected. Doing only the
+    // first made the key and the button mean different things.
+    const store = makeStore();
+    const note = store
+      .getState()
+      .score!.tracks[0]!.measures[0]!.voices[0]!.events.find(isNoteEvent)!;
+    store.getState().setSelection({
+      eventIds: [note.id],
+      measureIds: [],
+      trackIds: [],
+    });
+
+    runEditorShortcut(store, chord({ key: '4' }));
+    const durationOf = () => {
+      const id = store.getState().selection.eventIds[0] ?? note.id;
+      const event = findEvent(store.getState().score!, id);
+      return event?.durationTicks;
+    };
+    expect(store.getState().snapGrid).toBe('eighth');
+    expect(durationOf()).toBe(ticksFor('eighth', 480));
+
+    runEditorShortcut(store, chord({ key: '.' }));
+    expect(store.getState().snapGrid).toBe('dotted-eighth');
+    expect(durationOf()).toBe(ticksFor('dotted-eighth', 480));
+  });
+
+  it('claims a key whose control is unavailable, and does nothing with it', () => {
+    // Swallowed rather than handed back: while playing, N passing through to
+    // the page would be a key that sometimes types into something else.
+    const store = makeStore();
+    store.setTransport('playing');
+
+    expect(runEditorShortcut(store, chord({ key: 'n' }))).toBe(true);
+    expect(store.getState().noteInput).toBe(false);
   });
 });

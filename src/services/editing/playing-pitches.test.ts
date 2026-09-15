@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SoundingNote } from '@sudobility/music_types';
-import { playingPitchesForTrack } from './playing-pitches.js';
+import { litKeys, playingPitchesForTrack } from './playing-pitches.js';
 
 const sounding = (
   noteId: string,
@@ -53,5 +53,25 @@ describe('playingPitchesForTrack', () => {
       'track-0'
     );
     expect(pitches.size).toBe(1);
+  });
+});
+
+describe('litKeys', () => {
+  const notes = [sounding('n1', 'track-0', 60), sounding('n2', 'track-1', 64)];
+
+  it('lights the active track while playing, plus held keys', () => {
+    const lit = litKeys(notes, 'track-0', 'playing', new Set([72]));
+    expect([...lit].sort()).toEqual([60, 72]);
+  });
+
+  it('lights nothing from the engine while paused, which does not clear it', () => {
+    // The engine clears sounding notes on stop but not on pause; without the
+    // gate whatever was mid-chord stays lit.
+    expect([...litKeys(notes, 'track-0', 'paused', new Set())]).toEqual([]);
+    expect([...litKeys(notes, 'track-0', 'stopped', [67])]).toEqual([67]);
+  });
+
+  it('never lights another track', () => {
+    expect(litKeys(notes, 'track-0', 'playing', []).has(64)).toBe(false);
   });
 });
