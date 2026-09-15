@@ -36,6 +36,25 @@ export function playingPitchesForTrack(
 }
 
 /**
+ * Whether two sets of lit keys light the same keys.
+ *
+ * The sounding notes change on every note of every track, and the keyboard
+ * shows one: a new set per change is a new value to React even when not one of
+ * its keys moved, so on a multi-track score the whole keyboard re-rendered for
+ * notes it does not show. Both apps' keyboards keep the set they have when this
+ * says nothing changed.
+ */
+export function samePitchSet(
+  a: ReadonlySet<number>,
+  b: ReadonlySet<number>
+): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const midi of a) if (!b.has(midi)) return false;
+  return true;
+}
+
+/**
  * Every key the keyboard should draw pressed.
  *
  * The active track's sounding pitches — **only while playing** — plus the keys

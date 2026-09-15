@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { SoundingNote } from '@sudobility/music_types';
-import { litKeys, playingPitchesForTrack } from './playing-pitches.js';
+import {
+  litKeys,
+  playingPitchesForTrack,
+  samePitchSet,
+} from './playing-pitches.js';
 
 const sounding = (
   noteId: string,
@@ -73,5 +77,26 @@ describe('litKeys', () => {
 
   it('never lights another track', () => {
     expect(litKeys(notes, 'track-0', 'playing', []).has(64)).toBe(false);
+  });
+});
+
+describe('samePitchSet', () => {
+  it('matches the same keys in any order', () => {
+    expect(samePitchSet(new Set([60, 64]), new Set([64, 60]))).toBe(true);
+    expect(samePitchSet(new Set(), new Set())).toBe(true);
+  });
+
+  it('tells a changed key from an unchanged one', () => {
+    expect(samePitchSet(new Set([60, 64]), new Set([60, 65]))).toBe(false);
+    expect(samePitchSet(new Set([60]), new Set([60, 64]))).toBe(false);
+  });
+
+  it('sees nothing change when another track’s note starts', () => {
+    const before = playingPitchesForTrack([sounding('a', 't1', 60)], 't1');
+    const after = playingPitchesForTrack(
+      [sounding('a', 't1', 60), sounding('b', 't2', 67)],
+      't1'
+    );
+    expect(samePitchSet(before, after)).toBe(true);
   });
 });
