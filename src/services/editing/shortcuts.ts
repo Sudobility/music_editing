@@ -44,21 +44,7 @@ import {
 } from '../../domain/notation/note-entry.js';
 import { withModifier } from '@sudobility/music_types';
 import { selectToolbarAvailability } from './toolbar.js';
-import type { ToolbarControl } from './toolbar.js';
-
-/**
- * One keypress, platform-free.
- *
- * `mod` is Cmd on macOS and Ctrl elsewhere, resolved by the host because only
- * it knows which platform it is on — and reserved for the system throughout
- * this table, so a browser or OS shortcut is never mistaken for an edit.
- */
-export type EditorKeyChord = {
-  key: string;
-  shift: boolean;
-  alt: boolean;
-  mod: boolean;
-};
+import type { EditorKeyChord, ToolbarControl } from '@sudobility/music_types';
 
 /**
  * What the host lends the table.

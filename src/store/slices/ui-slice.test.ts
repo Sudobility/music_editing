@@ -1,21 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import * as musicTypes from '@sudobility/music_types';
-import { NOTATION_ICON_NAMES } from '@sudobility/music_types';
 import { testEditingStore } from '../../test/store.js';
-import { EDIT_MODES, EDIT_MODE_OPTIONS } from './ui-slice.js';
-import type { EditMode } from './ui-slice.js';
 
 describe('ui-slice', () => {
-  it('defaults to no explicit active track, system theme, zoom 1, quarter-note snap, developer mode off', () => {
+  it('defaults to no explicit active track, zoom 1, quarter-note snap', () => {
     const store = testEditingStore();
     const state = store.getState();
     expect(state.activeTrackId).toBeNull();
     expect(state.visibleTrackIds).toBeNull();
     expect(state.editMode).toBe('replace');
-    expect(state.themeMode).toBe('system');
     expect(state.zoom).toBe(1);
     expect(state.snapGrid).toBe('quarter');
-    expect(state.developerMode).toBe(false);
     expect(state.toasts).toEqual([]);
     expect(state.dialogs).toEqual({});
   });
@@ -24,14 +18,10 @@ describe('ui-slice', () => {
     const store = testEditingStore();
     store.getState().setActiveTrack('track-1');
     expect(store.getState().activeTrackId).toBe('track-1');
-    store.getState().setThemeMode('dark');
-    expect(store.getState().themeMode).toBe('dark');
     store.getState().setZoom(2);
     expect(store.getState().zoom).toBe(2);
     store.getState().setSnapGrid('eighth');
     expect(store.getState().snapGrid).toBe('eighth');
-    store.getState().setDeveloperMode(true);
-    expect(store.getState().developerMode).toBe(true);
   });
 
   describe('visible tracks', () => {
@@ -70,15 +60,6 @@ describe('ui-slice', () => {
       const before = store.dirtyCount();
       store.getState().setActiveTrack('b');
       expect(store.dirtyCount()).toBe(before);
-    });
-  });
-
-  describe('setDevSettings', () => {
-    it('merges the patch into devSettings', () => {
-      const store = testEditingStore();
-      store.getState().setDevSettings({ showIds: true });
-      expect(store.getState().devSettings.showIds).toBe(true);
-      expect(store.getState().devSettings.showTicks).toBe(false); // untouched
     });
   });
 
@@ -179,61 +160,5 @@ describe('pitchDisplay', () => {
     expect(store.getState().pitchDisplay).toBe('concert');
     store.getState().setPitchDisplay('written');
     expect(store.getState().pitchDisplay).toBe('written');
-  });
-});
-
-describe('EDIT_MODE_OPTIONS', () => {
-  it('offers every edit mode once, in toolbar order', () => {
-    expect(EDIT_MODE_OPTIONS.map(option => option.value)).toEqual([
-      ...EDIT_MODES,
-    ]);
-    expect(EDIT_MODES).toEqual(['insert', 'replace', 'stack']);
-  });
-
-  it('carries a label key, a hint key and a glyph for each', () => {
-    for (const option of EDIT_MODE_OPTIONS) {
-      expect(option.labelKey).toBe(`editor.${option.value}Mode`);
-      expect(option.hintKey).toBe(`editor.${option.value}ModeHint`);
-      expect(option.icon).toMatch(/Icon$/);
-    }
-  });
-
-  it('gives each the glyph and keys both toolbars draw', () => {
-    expect(EDIT_MODE_OPTIONS).toEqual([
-      {
-        value: 'insert',
-        icon: 'InsertModeIcon',
-        labelKey: 'editor.insertMode',
-        hintKey: 'editor.insertModeHint',
-      },
-      {
-        value: 'replace',
-        icon: 'ReplaceModeIcon',
-        labelKey: 'editor.replaceMode',
-        hintKey: 'editor.replaceModeHint',
-      },
-      {
-        value: 'stack',
-        icon: 'ChordIcon',
-        labelKey: 'editor.stackMode',
-        hintKey: 'editor.stackModeHint',
-      },
-    ]);
-    const known = new Set<string>(NOTATION_ICON_NAMES);
-    for (const option of EDIT_MODE_OPTIONS) {
-      expect(known.has(option.icon)).toBe(true);
-    }
-  });
-
-  it('is declared here, not passed through from music_types', () => {
-    // Two packages publishing one name is a TS2308 in music_lib's build and a
-    // "Cannot redefine property" crash in a CommonJS consumer. It lives beside
-    // `EditMode` and nowhere else.
-    expect('EDIT_MODE_OPTIONS' in musicTypes).toBe(false);
-  });
-
-  it('is typed as the edit modes this package declares', () => {
-    const values: readonly EditMode[] = EDIT_MODE_OPTIONS.map(o => o.value);
-    expect(values).toEqual([...EDIT_MODES]);
   });
 });

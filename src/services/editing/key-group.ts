@@ -16,14 +16,7 @@
  * What the group *becomes* is `playKeyGroup`, next door; this only decides
  * where one group ends.
  */
-export type KeyGroup = {
-  /** Every key touched since the first went down, in the order touched. */
-  midis: readonly number[];
-  /** Keys still held. Empty means the group is finished. */
-  down: readonly number[];
-  /** When the first key went down; 0 when no group is open. */
-  startedAt: number;
-};
+import type { KeyGroup, ReleaseResult } from '@sudobility/music_types';
 
 export const EMPTY_GROUP: KeyGroup = { midis: [], down: [], startedAt: 0 };
 
@@ -37,12 +30,6 @@ export function pressKey(group: KeyGroup, midi: number, now: number): KeyGroup {
     down: group.down.includes(midi) ? group.down : [...group.down, midi],
   };
 }
-
-export type ReleaseResult = {
-  group: KeyGroup;
-  /** Set once the last finger lifts — what to hand `playKeyGroup`. */
-  finished: { midis: readonly number[]; heldMs: number } | null;
-};
 
 export function releaseKey(
   group: KeyGroup,

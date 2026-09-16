@@ -275,7 +275,7 @@ describe('the inspector and pitch drag follow the same rule as transposing', () 
   it('refuses the inspector moving an imported note further away', () => {
     const { target, id, midiNow } = withFirstNoteAt(40);
     store = target;
-    setNotePitch(store, id, midiToPitch(39), 'concert');
+    expect(setNotePitch(store, id, midiToPitch(39), 'concert')).toBe(false);
     expect(midiNow()).toBe(40);
     expect(warnings(store).length).toBe(1);
   });

@@ -15,7 +15,9 @@
  */
 import type {
   Clef,
+  InspectorTab,
   Measure,
+  MeasureClefValue,
   ReplaceScope,
   ScoreSelection,
   Track,
@@ -24,6 +26,7 @@ import type {
 import {
   CLEFS,
   INHERIT_CLEF,
+  MIX_ONLY_CONTROLS,
   clampBpm,
   effectiveClef,
   measureIndexOf,
@@ -42,29 +45,6 @@ import { selectionKind } from './selection-kind.js';
 import { setMeasureClef, setTempoAt } from './editing.js';
 
 // ---- tabs --------------------------------------------------------------------
-
-/**
- * The inspector's tabs, in the web order.
- *
- * Score first, then Track — the only tab that always has something to show,
- * since there is always an active track — then Note and Bar. The native panel
- * listed Track, Note, Measure, Score; one order means a reader moving between
- * the apps finds the same tab in the same place.
- *
- * `measure` is the id and the model's word; the label is "Bar" (see the app's
- * copy), because the reader is shown a bar and the code keeps `Measure`.
- */
-export const INSPECTOR_TABS = ['score', 'track', 'note', 'measure'] as const;
-
-export type InspectorTab = (typeof INSPECTOR_TABS)[number];
-
-/** The copy key naming each tab. */
-export const INSPECTOR_TAB_LABEL_KEY: Record<InspectorTab, string> = {
-  score: 'inspector.score',
-  track: 'inspector.track',
-  note: 'inspector.note',
-  measure: 'inspector.measure',
-};
 
 /**
  * The tab a fresh selection opens.
@@ -98,23 +78,6 @@ export function defaultInspectorTab(
 export function selectEditLocked(state: TransportAwareness): boolean {
   return state.state === 'playing';
 }
-
-/**
- * The controls that stay live while the transport plays.
- *
- * Mixing, not editing: these are `kind: 'mix'` commands and reach the engine
- * live, because muting a part while listening is how an arrangement gets
- * listened to. Everything else in the inspector locks. A list rather than a
- * flag per control so the exemption is one decision, written down.
- */
-export const MIX_ONLY_CONTROLS = [
-  'trackVolume',
-  'trackPan',
-  'trackMute',
-  'trackSolo',
-] as const;
-
-export type MixOnlyControl = (typeof MIX_ONLY_CONTROLS)[number];
 
 /** Whether the named control is disabled right now. Unknown names lock. */
 export function controlLocked(
@@ -191,9 +154,6 @@ export function setClefAtMeasure<T extends EditingState>(
   setMeasureClef(store, track.id, index, clef);
   return true;
 }
-
-/** A picker value for a bar's clef: a clef, or inherit-what-is-in-force. */
-export type MeasureClefValue = Clef | typeof INHERIT_CLEF;
 
 /**
  * What the bar-clef picker shows and offers.

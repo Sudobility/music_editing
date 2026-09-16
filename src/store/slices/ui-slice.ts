@@ -1,147 +1,28 @@
 /**
- * UI slice (spec §6, §33): active track, theme, zoom/snap, developer settings
- * (spec §33: mock seed, id/tick overlays), dialog open-state, and toasts.
+ * UI slice (spec §6): active track, zoom/snap, pitch display, edit mode and
+ * voice, dialog open-state, and toasts.
  * Pure UI/app state — no domain mutation happens here (that's always
  * `score-slice.dispatchCommand`).
  *
  * There is no view mode: notation and the piano roll are shown at the same
  * time, so nothing switches between them.
+ *
+ * The theme, developer mode and developer settings are not here: they are
+ * device prefs no edit reads, and live in music_lib's device-prefs slice.
+ * `pitchDisplay` stays, because note entry inverts the written-pitch lens.
  */
 import { createId } from '@sudobility/music_types';
 import type {
   DurationName,
-  NotationIconName,
+  EditMode,
+  PitchDisplay,
+  ToastAction,
+  ToastSeverity,
+  Toast,
   UUID,
 } from '@sudobility/music_types';
 import type { EditingState, SliceArgs } from '../editing-store.js';
 import { getMusicSelectionSource } from '../../services/selection/singleton.js';
-
-/**
- * The colour scheme a reader asked for.
- *
- * An array with the type read off it, not a bare union: a union has no runtime
- * form, so the settings picker in each app would have to write the list out
- * again — which is how one of them comes to offer a mode nothing applies.
- * `system` means "follow the OS", and is the default because a device that has
- * been told to go dark at sunset should take the app with it.
- */
-export const THEME_MODES = ['light', 'dark', 'system'] as const;
-
-export type ThemeMode = (typeof THEME_MODES)[number];
-
-/*
-  Declared in music_types, beside `displayScore` — the lens that consumes it —
-  and re-exported here so every existing `PitchDisplay` import off this package
-  still resolves. Two declarations is what it was: music_lib `export *`s from
-  both packages, and TypeScript refuses the ambiguity (TS2308) the moment the
-  same name arrives from two different modules.
-*/
-import type { PitchDisplay } from '@sudobility/music_types';
-export type { PitchDisplay };
-
-export type DevSettings = {
-  showIds: boolean;
-  showTicks: boolean;
-  /** Spec §33: "show measure boundaries". */
-  showMeasureBoundaries: boolean;
-  /** Spec §33: "show playback scheduling data". */
-  showPlaybackScheduling: boolean;
-  /** Spec §33: "enable generation diagnostics". */
-  enableDiagnostics: boolean;
-  /** Spec §33: "enable validation warnings" (warning-severity issues, in addition to errors). */
-  enableValidationWarnings: boolean;
-  /**
-   * Which generation backend new scores are asked from.
-   *
-   * A developer setting rather than a Generate-dialog control on purpose: the
-   * answer is the same for every generation until somebody is deliberately
-   * comparing two of them, and putting it in the ordinary flow would ask every
-   * user a question they have no basis to answer.
-   *
-   * Typed as a plain string rather than `GenerationVariant` so a value stored
-   * by a newer build cannot break an older one — the server resolves it through
-   * an allow-list and falls back to the default, so an unrecognised value is
-   * harmless at both ends.
-   */
-  generationVariant: string;
-};
-
-export type ToastSeverity = 'info' | 'success' | 'warning' | 'error';
-/** An optional action button (spec §28: "retry actions where appropriate"), e.g. "Retry" on a failed import/save toast. */
-export type ToastAction = { label: string; onClick: () => void };
-export type Toast = {
-  id: string;
-  message: string;
-  severity: ToastSeverity;
-  action?: ToastAction;
-};
-
-const DEFAULT_DEV_SETTINGS: DevSettings = {
-  // Shares registry.ts's DEFAULT_MOCK_SEED (rather than a locally hardcoded
-  // with (see registry.ts's DEFAULT_MOCK_SEED doc comment).
-  showIds: false,
-  showTicks: false,
-  showMeasureBoundaries: false,
-  showPlaybackScheduling: false,
-  enableDiagnostics: false,
-  enableValidationWarnings: true,
-  generationVariant: 'default',
-};
-
-/**
- * What happens to music already at the caret when a new note is written.
- *
- * `insert` shifts the active track's later notes out of the way, `replace`
- * overwrites them, `stack` joins them as a chord. Deliberately NOT about
- * whether one gesture makes a chord — keys held together are one chord in
- * every mode, because that is what playing them means.
- */
-export const EDIT_MODES = ['insert', 'replace', 'stack'] as const;
-
-export type EditMode = (typeof EDIT_MODES)[number];
-
-/**
- * The edit modes as a toolbar offers them: in order, each with its glyph and
- * its label and hint keys.
- *
- * Beside `EditMode` because that is what it lists. It sat in music_types for a
- * while, where the three values had to be spelled out again because that
- * package may not import the type naming them — a second statement of the
- * vocabulary, pinned to this one only by a test. It was passed through from
- * here rather than declared twice: music_lib `export *`s both packages, and two
- * bindings under one name are a TS2308 in its build and a "Cannot redefine
- * property" crash at load in any CommonJS consumer (the native app's jest suite
- * died on every file). Now there is one binding, and it is this one.
- *
- * Stack's hint has a second form, `editor.stackModeUnavailable`, for a track
- * whose instrument cannot play a chord — that depends on the track, so the
- * caller picks it (`editModeHintKey`).
- */
-export const EDIT_MODE_OPTIONS: ReadonlyArray<{
-  value: EditMode;
-  icon: NotationIconName;
-  labelKey: string;
-  hintKey: string;
-}> = [
-  {
-    value: 'insert',
-    icon: 'InsertModeIcon',
-    labelKey: 'editor.insertMode',
-    hintKey: 'editor.insertModeHint',
-  },
-  {
-    value: 'replace',
-    icon: 'ReplaceModeIcon',
-    labelKey: 'editor.replaceMode',
-    hintKey: 'editor.replaceModeHint',
-  },
-  {
-    value: 'stack',
-    icon: 'ChordIcon',
-    labelKey: 'editor.stackMode',
-    hintKey: 'editor.stackModeHint',
-  },
-];
 
 export type UiSlice = {
   /**
@@ -181,7 +62,6 @@ export type UiSlice = {
    */
   visibleTrackIds: string[] | null;
 
-  themeMode: ThemeMode;
   zoom: number;
   snapGrid: DurationName;
 
@@ -220,8 +100,6 @@ export type UiSlice = {
    */
   activeVoiceIndex: number;
 
-  developerMode: boolean;
-  devSettings: DevSettings;
   dialogs: Record<string, boolean>;
   toasts: Toast[];
 
@@ -239,15 +117,11 @@ export type UiSlice = {
    */
   setVisibleTracks: (trackIds: string[]) => void;
 
-  setThemeMode: (mode: ThemeMode) => void;
   setZoom: (zoom: number) => void;
   setSnapGrid: (grid: DurationName) => void;
   setPitchDisplay: (display: PitchDisplay) => void;
   setEditMode: (mode: EditMode) => void;
   setActiveVoice: (voiceIndex: number) => void;
-  setDeveloperMode: (enabled: boolean) => void;
-  /** Merges `patch` into `devSettings`. */
-  setDevSettings: (patch: Partial<DevSettings>) => void;
   openDialog: (id: string) => void;
   closeDialog: (id: string) => void;
   toggleDialog: (id: string) => void;
@@ -267,14 +141,11 @@ export const createUiSlice = <T extends EditingState>({
   noteInput: false,
   activeTrackId: null,
   visibleTrackIds: null,
-  themeMode: 'system',
   zoom: 1,
   snapGrid: 'quarter',
   pitchDisplay: 'concert',
   editMode: 'replace',
   activeVoiceIndex: 0,
-  developerMode: false,
-  devSettings: DEFAULT_DEV_SETTINGS,
   dialogs: {},
   toasts: [],
 
@@ -314,11 +185,6 @@ export const createUiSlice = <T extends EditingState>({
     });
     changed();
   },
-  setThemeMode: mode => {
-    set(state => {
-      state.themeMode = mode;
-    });
-  },
   setZoom: zoom => {
     set(state => {
       state.zoom = zoom;
@@ -344,16 +210,6 @@ export const createUiSlice = <T extends EditingState>({
     // `voices[-1]`, which is not a voice and not an error either.
     set(state => {
       state.activeVoiceIndex = Math.max(0, Math.floor(voiceIndex));
-    });
-  },
-  setDeveloperMode: enabled => {
-    set(state => {
-      state.developerMode = enabled;
-    });
-  },
-  setDevSettings: patch => {
-    set(state => {
-      Object.assign(state.devSettings, patch);
     });
   },
   openDialog: id => {

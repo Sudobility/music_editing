@@ -10,16 +10,15 @@
  * parted: a long press on a stave in the native app aimed the caret, which
  * cleared the selection the menu was about to act on.
  *
- * The geometry stays with the renderer; the meaning is here. The hit types are
- * **structural** on purpose — declared in this package rather than imported
- * from music_drawing, which this package may not depend on — and music_drawing's
- * `ScoreCanvasHit` is assignable to `ScoreHit` as it stands, so a host passes
- * the canvas's answer straight through.
+ * The geometry stays with the renderer; the meaning is here. The hit is
+ * music_types' `ScoreCanvasHit` — the one shape music_drawing's canvas answers
+ * with and this reads — so a host passes the canvas's answer straight through.
  */
 import type {
   NoteEvent,
-  Pitch,
-  PitchDisplay,
+  PointerGesture,
+  ScoreCanvasHit,
+  ScorePressModifiers,
   UUID,
 } from '@sudobility/music_types';
 import {
@@ -38,53 +37,6 @@ import {
   selectToTick,
   writeNoteAtPoint,
 } from './editing.js';
-
-/**
- * Whatever lies under a press, as the renderer reports it.
- *
- * `null` (passed where a hit is expected) means the press landed on nothing —
- * between systems, or on the gutter's empty band.
- *
- * A stave's `pitch` is the pitch **as drawn** at that point, after the display
- * lenses; `routeScorePress` inverts them itself, because a drawn pitch stored
- * raw writes a note an octave out inside an `8va` and a tone out on a B-flat
- * part — and it does so silently, since the note then draws where it was
- * pressed and only sounds wrong.
- */
-export type ScoreHit =
-  | { kind: 'trackGutter'; trackId: UUID }
-  | { kind: 'measureNumber'; measureIndex: number }
-  | {
-      kind: 'note';
-      /** Every event sharing the notehead's box: a chord is one target. */
-      eventIds: readonly UUID[];
-      trackId: UUID;
-      tick: number;
-    }
-  | { kind: 'stave'; trackId: UUID; tick: number; pitch: Pitch | null };
-
-export type ScorePressModifiers = {
-  shift: boolean;
-  /** Cmd on macOS, Ctrl elsewhere — resolved by the host. */
-  mod: boolean;
-  /** The store's `noteInput`, passed so a host can route a press it has already read. */
-  noteInput: boolean;
-  /** How the pressed pitch was drawn, so it can be taken back to sounding pitch. */
-  pitchDisplay: PitchDisplay;
-  /** The bar a shift-extended bar selection grows from; see `selectMeasureRange`. */
-  anchor: number | null;
-  /**
-   * The tick the canvas reports for the press point (`ScoreCanvas.tickAt`), or
-   * null where there is none. What a Mod press selects *to*.
-   *
-   * Not the hit's own tick: a hit only exists inside a measure, and its tick
-   * falls back to 0 where the canvas has no answer — so reading it made a
-   * Mod press between systems do nothing and one on an unmapped stretch select
-   * back to the start of the piece. Required rather than defaulted to the hit,
-   * so a host cannot quietly keep the old answer.
-   */
-  pointTick: number | null;
-};
 
 /**
  * Perform an ordinary press (a click, a tap) and answer the next bar anchor.
@@ -112,7 +64,7 @@ export type ScorePressModifiers = {
  */
 export function routeScorePress<T extends EditingState>(
   store: EditingStoreApi<T>,
-  hit: ScoreHit | null,
+  hit: ScoreCanvasHit | null,
   modifiers: ScorePressModifiers
 ): number | null {
   const state = store.getState();
@@ -192,7 +144,7 @@ export function routeScorePress<T extends EditingState>(
  */
 export function selectForContextMenu<T extends EditingState>(
   store: EditingStoreApi<T>,
-  hit: ScoreHit | null,
+  hit: ScoreCanvasHit | null,
   anchor: number | null
 ): number | null {
   const state = store.getState();
@@ -232,31 +184,6 @@ export function selectForContextMenu<T extends EditingState>(
 }
 
 /**
- * What a primary press that may become a drag starts.
- *
- * - `move` — Alt on a note: drag the selection to another track or tick. The
- *   anchor is the last id of the box. `selectChord` is the chord to select
- *   first when none of it is selected yet (null to keep the selection); an
- *   explicit modifier leaves no ambiguity with a box select, so requiring a
- *   prior selection would be friction for nothing.
- * - `pitchDrag` — a press on the *one* selected note. Requiring it to be
- *   selected first is what keeps an ordinary press-and-drag across the staff a
- *   box select.
- * - `box` — everything else; Shift adds to the selection rather than replacing
- *   it. A box that never moves past the host's slop is an ordinary press, and
- *   goes to `routeScorePress` instead.
- */
-export type PointerGesture =
-  | {
-      kind: 'move';
-      anchorId: UUID;
-      anchorTick: number;
-      selectChord: readonly UUID[] | null;
-    }
-  | { kind: 'pitchDrag'; eventId: UUID; pitch: Pitch }
-  | { kind: 'box'; additive: boolean };
-
-/**
  * Decide what a press starts. Pure: reads the state, changes nothing — so a
  * host can classify on pointer-down and apply once the gesture is committed.
  *
@@ -267,7 +194,7 @@ export type PointerGesture =
  */
 export function classifyPointerDown(
   state: Pick<EditingState, 'score' | 'selection'>,
-  hit: ScoreHit | null,
+  hit: ScoreCanvasHit | null,
   modifiers: { alt: boolean; shift: boolean }
 ): PointerGesture {
   const score = state.score;
@@ -311,7 +238,7 @@ export function classifyPointerDown(
  */
 export function startPointerGesture<T extends EditingState>(
   store: EditingStoreApi<T>,
-  hit: ScoreHit | null,
+  hit: ScoreCanvasHit | null,
   modifiers: { alt: boolean; shift: boolean }
 ): PointerGesture {
   const gesture = classifyPointerDown(store.getState(), hit, modifiers);

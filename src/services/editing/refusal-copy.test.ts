@@ -21,7 +21,6 @@ import {
 import type { NoteEvent, Score } from '@sudobility/music_types';
 import { twinkleScore } from '@sudobility/music_types/test';
 import { testEditingStore } from '../../test/store.js';
-import type { EditingCopy, OutOfRangeCopy, PolyphonyCopy } from './copy.js';
 import { editingCopy, setEditingCopy } from './copy.js';
 import {
   changeAccidental,
@@ -32,6 +31,11 @@ import {
   setNotePitch,
   transposeOctave,
 } from './editing.js';
+import type {
+  EditingCopy,
+  OutOfRangeCopy,
+  PolyphonyCopy,
+} from '@sudobility/music_types';
 
 /** Violin: a measured compass starting at G3, two notes at once. */
 const VIOLIN = 40;

@@ -3,10 +3,10 @@ import { twoTrackScore } from '@sudobility/music_types/test';
 import { allNotes, emptySelection } from '@sudobility/music_types';
 import { testEditingStore } from '../../test/store.js';
 import {
-  SCORE_CONTEXT_ACTIONS,
   runScoreContextAction,
   scoreContextMenuModel,
 } from './context-menu.js';
+import { SCORE_CONTEXT_ACTIONS } from '@sudobility/music_types';
 
 function enabled(model: ReturnType<typeof scoreContextMenuModel>) {
   return Object.fromEntries(model.entries.map(e => [e.action, e.enabled]));

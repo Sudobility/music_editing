@@ -11,10 +11,10 @@ import { selectionToRange } from '@sudobility/music_types';
 import { emptySelection } from '@sudobility/music_types';
 import type { ScoreSelection } from '@sudobility/music_types';
 import type {
+  ClipboardData,
   MeasureSlice,
   NoteEvent,
   Score,
-  Track,
   UUID,
 } from '@sudobility/music_types';
 import { isNoteEvent } from '@sudobility/music_types';
@@ -37,36 +37,7 @@ import { closeGap, makeRoom } from '@sudobility/music_types';
 import { transformCommand } from '@sudobility/music_types';
 import type { EditingState, SliceArgs } from '../editing-store.js';
 import { getMusicSelectionSource } from '../../services/selection/singleton.js';
-
-/**
- * What was copied, tagged with what kind of thing it is.
- *
- * A union rather than three fields, because the clipboard holds exactly one
- * thing and Paste is only offered when its kind matches the selection's — see
- * `canPasteInto`. It was a bare `{events, anchorTick}` while notes were the only
- * thing that could be copied at all.
- *
- * A **measures** entry is a vertical slice: the bars at those indices across
- * every track, not one part's. That is what the score model already means by a
- * bar — `deleteMeasureCommand` removes one from every track — and it is what
- * lets insert and replace put a slice back without leaving the parts
- * disagreeing about where bar 40 is.
- */
-export type ClipboardData = (
-  | { kind: 'notes'; events: NoteEvent[]; anchorTick: number }
-  | { kind: 'measures'; slice: MeasureSlice; count: number }
-  | { kind: 'track'; track: Track }
-) & {
-  /**
-   * Whether the clipboard was filled by a cut rather than a copy.
-   *
-   * It matters only when a paste is refused: after a copy the music is still
-   * where it was, but after a cut it exists nowhere except the clipboard and
-   * the undo history, so the refusal offers Undo. Absent reads as a copy, so a
-   * clipboard built by hand elsewhere needs no change.
-   */
-  fromCut?: boolean;
-};
+import { selectEffectiveEditMode } from '../selectors.js';
 
 export type SelectionSlice = {
   selection: ScoreSelection;
@@ -380,7 +351,7 @@ export const createSelectionSlice = <T extends EditingState>({
     },
 
     paste: (atTick, options) => {
-      const { score, clipboard, selection, editMode } = get();
+      const { score, clipboard, selection } = get();
       if (!score || !clipboard) return;
       /*
       A measure or track paste needs a target of its own kind; a note paste does
@@ -401,8 +372,11 @@ export const createSelectionSlice = <T extends EditingState>({
 
       // Paste obeys the edit mode for the same reason entry does: pasting on top
       // of existing music is the same question as playing on top of it, and
-      // answering it differently in the two places would be arbitrary.
-      const scope = options?.scope ?? editMode;
+      // answering it differently in the two places would be arbitrary. The mode
+      // *in effect*, like entry: stack on a part that cannot play a chord reads
+      // as replace, and pasting chords onto a flute because a mode chosen on a
+      // piano was still stored would contradict the bar.
+      const scope = options?.scope ?? selectEffectiveEditMode(get());
 
       if (clipboard.kind === 'measures') {
         const indices = selectedMeasureIndices(score, selection);

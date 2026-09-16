@@ -21,7 +21,7 @@ import {
   lyricEntryStep,
   splitLyricSeparator,
 } from './lyric-entry.js';
-import type { LyricEntryState } from './lyric-entry.js';
+import type { LyricEntryState } from '@sudobility/music_types';
 
 const at = (index: number, count = 3, continuing = false): LyricEntryState => ({
   index,

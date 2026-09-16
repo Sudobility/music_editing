@@ -13,9 +13,6 @@ import {
 import type { NoteEvent, Score } from '@sudobility/music_types';
 import { testEditingStore } from '../../test/store.js';
 import {
-  INSPECTOR_TABS,
-  INSPECTOR_TAB_LABEL_KEY,
-  MIX_ONLY_CONTROLS,
   canReplace,
   commitBarTempo,
   controlLocked,
@@ -32,6 +29,11 @@ import {
   setNotePitch,
   setTimeSignature,
 } from './editing.js';
+import {
+  INSPECTOR_TABS,
+  INSPECTOR_TAB_LABEL_KEY,
+  MIX_ONLY_CONTROLS,
+} from '@sudobility/music_types';
 
 function makeStore(score: Score = twinkleScore()) {
   const store = testEditingStore();
@@ -313,6 +315,55 @@ describe('field rules in the editing operations', () => {
     expect(setTimeSignature(store, ids, { numerator: 6, denominator: 8 })).toBe(
       true
     );
+  });
+
+  it('changeVelocity says whether it wrote, and skips a velocity already there', () => {
+    // A field committed on blur with nothing changed is not an undo entry, and
+    // the panel needs the answer to know whether to reset its draft.
+    const store = makeStore();
+    const note = selectFirstNote(store);
+    expect(changeVelocity(store, 100)).toBe(true);
+    const before = store.getState().score;
+    expect(changeVelocity(store, 100)).toBe(false);
+    expect(changeVelocity(store, 100.2)).toBe(false);
+    expect(changeVelocity(store, Number.NaN)).toBe(false);
+    expect(store.getState().score).toBe(before);
+    store.getState().clearSelection();
+    expect(changeVelocity(store, 20)).toBe(false);
+    expect(
+      (findEvent(store.getState().score!, note.id) as NoteEvent).velocity
+    ).toBe(100);
+  });
+
+  it('changeVelocity is false when the playback lock refuses it', () => {
+    const store = makeStore();
+    selectFirstNote(store);
+    store.setTransport('playing');
+    expect(changeVelocity(store, 12)).toBe(false);
+  });
+
+  it('setFingering says whether it wrote', () => {
+    const store = makeStore();
+    selectFirstNote(store);
+    expect(setFingering(store, '3')).toBe(true);
+    expect(setFingering(store, ' 3 ')).toBe(false);
+    expect(setFingering(store, '')).toBe(true);
+    expect(setFingering(store, undefined)).toBe(false);
+    store.getState().clearSelection();
+    expect(setFingering(store, '4')).toBe(false);
+  });
+
+  it('setNotePitch says whether it wrote', () => {
+    const store = makeStore();
+    const note = allNotes(store.getState().score!)[0] as NoteEvent;
+    const up = { ...note.pitch, octave: note.pitch.octave + 1 };
+    expect(setNotePitch(store, note.id, up, 'concert')).toBe(true);
+    // The pitch it already has, and a note that is not there, write nothing.
+    expect(setNotePitch(store, note.id, up, 'concert')).toBe(false);
+    expect(setNotePitch(store, 'missing', up, 'concert')).toBe(false);
+    expect(
+      setNotePitch(store, note.id, { ...up, octave: Number.NaN }, 'concert')
+    ).toBe(false);
   });
 
   it('setFingering trims, clears on blank, and skips what is already there', () => {

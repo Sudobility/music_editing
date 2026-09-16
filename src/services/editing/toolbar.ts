@@ -13,23 +13,27 @@
  * Nothing here draws or names anything: availability is a boolean per control,
  * and every label or hint is an i18n key the host translates.
  */
-import type { UUID } from '@sudobility/music_types';
-import {
-  indexOfBarNumber,
-  ticksFor,
-  trackMaxPolyphony,
+import type {
+  AddTrackChoice,
+  AddTrackChoiceOption,
+  EditMode,
+  EditorMoreAction,
+  QuantizeGrid,
+  ToolbarAvailability,
+  UUID,
 } from '@sudobility/music_types';
+import {
+  EDITOR_MORE_ACTIONS,
+  EDIT_MODE_OPTIONS,
+  TOOLBAR_CONTROLS,
+} from '@sudobility/music_types';
+import { indexOfBarNumber, ticksFor } from '@sudobility/music_types';
 import { getMusicPositionSource } from '@sudobility/music_types';
 import type {
   EditingState,
   EditingStoreApi,
 } from '../../store/editing-store.js';
-import { EDIT_MODE_OPTIONS } from '../../store/slices/ui-slice.js';
-import type { EditMode } from '../../store/slices/ui-slice.js';
-import {
-  selectActiveTrackId,
-  selectSelectedTrack,
-} from '../../store/selectors.js';
+import { selectActiveTrackId, selectCanStack } from '../../store/selectors.js';
 import {
   addBlankTrack,
   addMeasure,
@@ -40,62 +44,6 @@ import {
   selectAll,
   toggleGlissando,
 } from './editing.js';
-import type { QuantizeGrid } from './view-settings.js';
-
-/**
- * Every control on the editing bar whose availability depends on the score.
- *
- * The view controls — zoom, layout, pitch display, the inspector toggle — are
- * deliberately absent: they change how the score is looked at rather than the
- * score, so they are live with no score, with nothing selected and while the
- * transport plays, and a row of constant `true`s would only be something for a
- * bar to forget to read.
- */
-export const TOOLBAR_CONTROLS = [
-  'addTrack',
-  'noteDuration',
-  'dotted',
-  'triplet',
-  'accidental',
-  'articulation',
-  'ornament',
-  'tie',
-  'insertMode',
-  'replaceMode',
-  'stackMode',
-  'insertNote',
-  'slur',
-  'crescendo',
-  'diminuendo',
-  'arpeggiate',
-  'beamBreak',
-  'beamNone',
-  'fermata',
-  'noteInput',
-  'insertRest',
-  'quantizeGrid',
-  'quantize',
-  'voice',
-  'moreActions',
-  'selectAll',
-  'addMeasure',
-  'deleteMeasure',
-  'goToBar',
-  'enterLyrics',
-  'glissando',
-] as const;
-
-export type ToolbarControl = (typeof TOOLBAR_CONTROLS)[number];
-
-export type ToolbarAvailability = Record<ToolbarControl, boolean>;
-
-/** Whether the active track's instrument can sound more than one note at once. */
-function canStack(state: EditingState): boolean {
-  const track = selectSelectedTrack(state);
-  // No track is "nothing to refuse": the mode is only meaningful once there is
-  // an instrument to ask.
-  return track === null || trackMaxPolyphony(track) > 1;
-}
 
 function computeAvailability(state: EditingState): ToolbarAvailability {
   const hasScore = state.score !== null;
@@ -128,7 +76,7 @@ function computeAvailability(state: EditingState): ToolbarAvailability {
     tie: canEdit && hasSelection,
     insertMode: hasScore,
     replaceMode: hasScore,
-    stackMode: hasScore && canStack(state),
+    stackMode: hasScore && selectCanStack(state),
     insertNote: canEdit,
     // A span needs two notes — a phrase mark or a wedge over one has nowhere
     // to go — and a mark that sits on a note needs one.
@@ -184,20 +132,6 @@ export function selectToolbarAvailability(
 }
 
 /**
- * The edit mode a write will actually use.
- *
- * `stack` on a part that cannot play a chord is a mode that would refuse every
- * edit, and the refusal would only surface after something had been played.
- * Both bars used to correct the stored mode from an effect; reading the
- * effective one needs no effect and cannot be a render late.
- */
-export function selectEffectiveEditMode(state: EditingState): EditMode {
-  return state.editMode === 'stack' && !canStack(state)
-    ? 'replace'
-    : state.editMode;
-}
-
-/**
  * The hint an edit-mode button shows.
  *
  * Stack has a second form for a track that cannot stack, which says why the
@@ -211,15 +145,6 @@ export function editModeHintKey(mode: EditMode, canStackHere: boolean): string {
     `editor.${mode}ModeHint`
   );
 }
-
-/**
- * How many voices the bar offers.
- *
- * Two is where notation actually needs them — stems up against stems down on
- * one stave. More is real notation too, but nothing else in the editor tells
- * voices apart yet, so offering four would be offering somewhere to lose notes.
- */
-export const EDITOR_VOICE_COUNT = 2;
 
 /** The hint for a voice button, counted from 0 like `activeVoiceIndex`. */
 export function voiceHintKey(voiceIndex: number): string {
@@ -264,7 +189,7 @@ export async function quantizeSelectionToGrid<T extends EditingState>(
  *
  * By the number a reader sees, which is not an index: a pickup has no number,
  * so on a score with one, bar 1 is the *second* measure. Both prompts used to
- * go through `caretToBar`, which counted `index + 1` and so landed one bar
+ * go through `caretToBar` (since removed), which counted `index + 1` and so landed one bar
  * early on every score with an anacrusis — the one place left that disagreed
  * with the number drawn in the gutter.
  *
@@ -287,15 +212,6 @@ export function goToBarFromInput<T extends EditingState>(
   getMusicPositionSource().moveTo(measure.startTick);
   return true;
 }
-
-export type AddTrackChoice = 'blank' | 'generate';
-
-export type AddTrackChoiceOption = {
-  value: AddTrackChoice;
-  labelKey: string;
-  hintKey: string;
-  disabled: boolean;
-};
 
 /**
  * The two ways to add a track, in the order both bars offer them.
@@ -343,38 +259,6 @@ export function runAddTrackChoice<T extends EditingState>(
   host.generateTrack?.();
   return null;
 }
-
-/** The rarely-used actions both bars keep behind a More menu, in order. */
-export const EDITOR_MORE_ACTIONS = [
-  {
-    value: 'select-all',
-    labelKey: 'editor.selectAllNotes',
-    control: 'selectAll',
-  },
-  {
-    value: 'add-measure',
-    labelKey: 'editor.addMeasure',
-    control: 'addMeasure',
-  },
-  {
-    value: 'delete-measure',
-    labelKey: 'editor.deleteMeasure',
-    control: 'deleteMeasure',
-  },
-  { value: 'go-to-bar', labelKey: 'editor.goToBar', control: 'goToBar' },
-  {
-    value: 'enter-lyrics',
-    labelKey: 'editor.enterLyrics',
-    control: 'enterLyrics',
-  },
-  { value: 'glissando', labelKey: 'editor.glissando', control: 'glissando' },
-] as const satisfies ReadonlyArray<{
-  value: string;
-  labelKey: string;
-  control: ToolbarControl;
-}>;
-
-export type EditorMoreAction = (typeof EDITOR_MORE_ACTIONS)[number]['value'];
 
 /**
  * Run a More-menu entry, unless it is unavailable.

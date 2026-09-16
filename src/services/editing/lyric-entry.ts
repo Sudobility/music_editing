@@ -20,7 +20,12 @@
  * is the one line that touches the store. That is what lets the rules be tested
  * without a field, a renderer or a keyboard.
  */
-import type { NoteEvent } from '@sudobility/music_types';
+import type {
+  LyricEntryState,
+  LyricInput,
+  LyricStep,
+  NoteEvent,
+} from '@sudobility/music_types';
 import {
   getMusicPosition,
   noteIndexAtOrAfter,
@@ -32,35 +37,6 @@ import type {
 } from '../../store/editing-store.js';
 import { selectActiveTrackId } from '../../store/selectors.js';
 import { writeLyric } from './editing.js';
-
-/** Where entry is in the line. */
-export type LyricEntryState = {
-  /** The note being written, into the notes entry began with. */
-  index: number;
-  /** How many notes the line has. */
-  count: number;
-  /** Whether the syllable before this one ended in a hyphen. */
-  continuing: boolean;
-};
-
-/** A keystroke, or its on-screen equivalent, that means something to entry. */
-export type LyricInput =
-  'space' | 'tab' | 'hyphen' | 'enter' | 'escape' | 'back';
-
-export type LyricWrite = {
-  index: number;
-  text: string;
-  continuing: boolean;
-  hyphenated: boolean;
-};
-
-export type LyricStep = {
-  state: LyricEntryState;
-  /** What to write, or null when the input writes nothing. */
-  write: LyricWrite | null;
-  /** Whether entry is over. */
-  close: boolean;
-};
 
 /**
  * Begin entry on the active track, at the first note at or after the caret.

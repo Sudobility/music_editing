@@ -9,7 +9,16 @@
  * not, which made the rule a matter of which button was pressed. They all come
  * through here now, so the answer and the wording are the same everywhere.
  */
-import type { Pitch, Score, Track, UUID } from '@sudobility/music_types';
+import type {
+  OutOfRangeCopy,
+  Pitch,
+  PitchChange,
+  RefusedEdit,
+  Score,
+  ToastAction,
+  Track,
+  UUID,
+} from '@sudobility/music_types';
 import {
   findEvent,
   findTrack,
@@ -26,7 +35,6 @@ import type {
   EditingStoreApi,
 } from '../../store/editing-store.js';
 import { editingCopy } from './copy.js';
-import type { OutOfRangeCopy, RefusedEdit } from './copy.js';
 
 /** All a refusal needs: somewhere to say so. A slice passes `{ getState: get }`. */
 type EditorStoreApi<T extends EditingState = EditingState> = Pick<
@@ -87,7 +95,7 @@ function pushRangeRefusal<T extends EditingState>(
   store: EditorStoreApi<T>,
   reason: Omit<OutOfRangeCopy, 'refused'>,
   refused: RefusedEdit,
-  action?: RefusalAction
+  action?: ToastAction
 ): void {
   const state = store.getState();
   const id = state.pushToast({
@@ -108,12 +116,6 @@ function pushRangeRefusal<T extends EditingState>(
 }
 
 /**
- * A button a refusal toast may carry. The toast is dismissed once it is used,
- * so the caller's `onClick` does only the work.
- */
-export type RefusalAction = { label: string; onClick: () => void };
-
-/**
  * The first of `pitches` the track cannot play, refused with a toast.
  *
  * The whole chord goes or none of it does, as with polyphony: writing the
@@ -124,7 +126,7 @@ export function refuseOutOfRange<T extends EditingState>(
   track: Track | null | undefined,
   pitches: readonly Pitch[],
   refused: RefusedEdit,
-  action?: RefusalAction
+  action?: ToastAction
 ): boolean {
   for (const pitch of pitches) {
     const reason = outOfRangeReason(track, pitch);
@@ -145,9 +147,6 @@ function distanceOutside(
   if (midi > range.max) return midi - range.max;
   return 0;
 }
-
-/** A change to an existing note's pitch. */
-export type PitchChange = { id: UUID; to: Pitch };
 
 /**
  * Refuses changes that would leave a note further outside its instrument than
@@ -217,7 +216,7 @@ export function refuseOutOfRangeArrival<T extends EditingState>(
   track: Track | null | undefined,
   pitches: readonly Pitch[],
   refused: RefusedEdit,
-  action?: RefusalAction
+  action?: ToastAction
 ): boolean {
   return refuseOutOfRange(store, track, pitches, refused, action);
 }

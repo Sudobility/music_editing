@@ -17,10 +17,8 @@ import {
 } from '@sudobility/music_types';
 import { twinkleScore, twoTrackScore } from '@sudobility/music_types/test';
 import { testEditingStore } from '../../test/store.js';
+import { selectEffectiveEditMode } from '../../store/selectors.js';
 import {
-  EDITOR_MORE_ACTIONS,
-  EDITOR_VOICE_COUNT,
-  TOOLBAR_CONTROLS,
   addTrackChoices,
   editModeHintKey,
   goToBarFromInput,
@@ -28,11 +26,15 @@ import {
   quantizeSelectionToGrid,
   runAddTrackChoice,
   runMoreAction,
-  selectEffectiveEditMode,
   selectToolbarAvailability,
   trackPickerVisible,
   voiceHintKey,
 } from './toolbar.js';
+import {
+  EDITOR_MORE_ACTIONS,
+  EDITOR_VOICE_COUNT,
+  TOOLBAR_CONTROLS,
+} from '@sudobility/music_types';
 
 function notesOf(store: ReturnType<typeof testEditingStore>): string[] {
   const score = store.getState().score!;
@@ -226,6 +228,14 @@ describe('toolbar actions', () => {
     // Bar 1 is the first counted bar: index 1, not the pickup at index 0.
     expect(goToBarFromInput(store, ' 1 ')).toBe(true);
     expect(getMusicPosition().reportedTick).toBe(measures[1]!.startTick);
+  });
+
+  it('is the only way to a bar: the index-counting caretToBar is gone', async () => {
+    // It counted `index + 1` and landed one bar early after a pickup. Kept
+    // exported with no caller, it is the obvious thing for a new prompt to
+    // reach for.
+    const index: Record<string, unknown> = await import('../../index.js');
+    expect(index).not.toHaveProperty('caretToBar');
   });
 
   it('refuses a bar that is not there and text that is not a number', () => {

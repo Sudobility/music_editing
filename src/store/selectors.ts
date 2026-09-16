@@ -20,8 +20,13 @@
 import { findEvent, findTrack } from '@sudobility/music_types';
 import { selectionToRange } from '@sudobility/music_types';
 import type { ScoreRange } from '@sudobility/music_types';
-import type { Measure, NoteEvent, Track } from '@sudobility/music_types';
-import { isNoteEvent } from '@sudobility/music_types';
+import type {
+  EditMode,
+  Measure,
+  NoteEvent,
+  Track,
+} from '@sudobility/music_types';
+import { isNoteEvent, trackMaxPolyphony } from '@sudobility/music_types';
 import type { EditingState } from './editing-store.js';
 
 /**
@@ -85,23 +90,14 @@ export const selectSelectedMeasureRange = memoize2(
   }
 );
 
-/**
- * The bar and beat a tick falls in.
- *
- * A re-export of `barBeatForTick`, which is where this now lives. There used
- * to be a second implementation here — `measureBeatAt` — and the two
- * **disagreed**: this one numbered bars `measure.index + 1`, while
- * `barBeatForTick` goes through `barNumberAt`.
- *
- * That difference is a bug, not a detail. A pickup bar is not counted, so
- * every bar after one is a bar lower than its position: on a score with an
- * anacrusis the web transport read one number and the React Native transport,
- * the inspector and "go to bar 33" read another. `barNumberAt` exists exactly
- * to stop `index + 1` being written down anywhere, and this was the one place
- * still doing it.
- */
-export { barBeatForTick } from '@sudobility/music_types';
-export type { BarBeat } from '@sudobility/music_types';
+/*
+  The bar and beat a tick falls in is `barBeatForTick`, in music_types, and it
+  is not re-exported from here: music_lib re-exports both packages wholesale,
+  and one name reaching it by two routes is what the single-home rule exists to
+  prevent. There used to be a second implementation here — `measureBeatAt` —
+  which numbered bars `measure.index + 1` and so counted a pickup; `barNumberAt`
+  exists to stop `index + 1` being written down anywhere.
+*/
 
 /**
  * The tracks to draw, in score order.
@@ -170,6 +166,36 @@ export const selectSelectedTrack = memoize2(
     return findTrack(score, activeTrackId);
   }
 );
+
+/**
+ * Whether the active track can play a chord, which is what stack mode needs.
+ *
+ * Asked through the *track*, never its program: a drum track's program is a
+ * kit, and Brush sits at 40, the Violin address. No track is "nothing to
+ * refuse" — the mode only means something once there is an instrument to ask.
+ */
+export function selectCanStack(state: EditingState): boolean {
+  const track = selectSelectedTrack(state);
+  return track === null || trackMaxPolyphony(track) > 1;
+}
+
+/**
+ * The edit mode a write will actually use.
+ *
+ * `stack` on a part that cannot play a chord is a mode that would refuse every
+ * edit, and the refusal would only surface after something had been played.
+ * The stored choice is left alone — it is the person's, and switching back to
+ * a piano should give it back — and every write reads this instead: chord
+ * entry, paste, and the toolbar that shows the mode. Both apps used to write
+ * the effective mode back into the store from an effect, because the write
+ * paths read the stored one; with the rule read at the point of writing there
+ * is nothing to reconcile and nothing that can be a render late.
+ */
+export function selectEffectiveEditMode(state: EditingState): EditMode {
+  return state.editMode === 'stack' && !selectCanStack(state)
+    ? 'replace'
+    : state.editMode;
+}
 
 /**
  * Every `Measure` named by `state.selection.measureIds` that still resolves,

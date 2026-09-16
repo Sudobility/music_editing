@@ -16,7 +16,7 @@ import {
 import { testEditingStore } from '../../test/store.js';
 import { twinkleScore } from '@sudobility/music_types/test';
 import { runEditorShortcut } from './shortcuts.js';
-import type { EditorKeyChord } from './shortcuts.js';
+import type { EditorKeyChord } from '@sudobility/music_types';
 
 function makeStore() {
   const store = testEditingStore();

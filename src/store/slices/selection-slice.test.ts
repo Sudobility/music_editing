@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { testEditingStore } from '../../test/store.js';
 import { emptySelection } from '@sudobility/music_types';
 import { twinkleScore, twoTrackScore } from '@sudobility/music_types/test';
-import { allNotes } from '@sudobility/music_types';
+import { allNotes, changeTrackPropsCommand } from '@sudobility/music_types';
 import type { ScoreSelection } from '@sudobility/music_types';
 import { createEditingStore } from '../create-editing-store.js';
 
@@ -293,6 +293,37 @@ describe('selectionRegenerated', () => {
       store.getState().paste(0);
 
       expect(notesOn(store, trackId).some(n => n.id === displaced)).toBe(false);
+    });
+
+    it('pastes as the mode in effect: a flute left in stack mode replaces', () => {
+      /*
+        The bar shows replace for a part that cannot play a chord, so pasting
+        must do what the bar says. Reading the stored stack stacked the pasted
+        notes onto a flute as chords it cannot play.
+      */
+      const { store, trackId } = storeWithClipboard();
+      store
+        .getState()
+        .dispatchCommand(
+          changeTrackPropsCommand(
+            trackId,
+            { midiProgram: 73, instrumentName: 'Flute' },
+            'flute'
+          )
+        );
+      store.getState().setEditMode('stack');
+      // The second note, not the first: pasting the copied note back onto
+      // itself is the same note in every mode, and proves nothing.
+      const displaced = notesOn(store, trackId)[1];
+
+      store.getState().paste(displaced.startTick);
+
+      expect(notesOn(store, trackId).some(n => n.id === displaced.id)).toBe(
+        false
+      );
+      expect(
+        notesOn(store, trackId).filter(n => n.startTick === displaced.startTick)
+      ).toHaveLength(1);
     });
 
     it('stack mode leaves the existing notes in place', () => {

@@ -5,14 +5,14 @@ import {
   twinkleScore,
   twoTrackScore,
 } from '@sudobility/music_types/test';
-import { allNotes, findEvent } from '@sudobility/music_types';
+import { allNotes, createEmptyScore, findEvent } from '@sudobility/music_types';
 import { isNoteEvent, changeTrackPropsCommand } from '@sudobility/music_types';
 import {
   getMusicPosition,
   getMusicPositionSource,
   resetMusicPosition,
 } from '@sudobility/music_types';
-import type { NoteEvent } from '@sudobility/music_types';
+import type { NoteEvent, UUID } from '@sudobility/music_types';
 import {
   addBlankTrack,
   canStackOnActiveTrack,
@@ -43,6 +43,7 @@ import {
   moveSelectionHorizontal,
   pasteWouldPrompt,
   placeCaret,
+  playKeyGroup,
   prepareReplacement,
   quantizeSelection,
   resizeNotes,
@@ -659,6 +660,106 @@ describe('the playback edit lock, at the entry points', () => {
   });
 });
 
+describe('entry writes with the edit mode in effect, not the stored one', () => {
+  beforeEach(() => resetMusicPosition());
+
+  /** A flute: one note at a time, so stack is not a mode it can have. */
+  function fluteStore() {
+    const store = makeStore();
+    const track = store.getState().score!.tracks[0];
+    store
+      .getState()
+      .dispatchCommand(
+        changeTrackPropsCommand(
+          track.id,
+          { midiProgram: 73, instrumentName: 'Flute' },
+          'flute'
+        )
+      );
+    return store;
+  }
+
+  it('replaces on a flute left in stack mode, rather than refusing', () => {
+    /*
+      Stack chosen on a piano stays stored when the part becomes a flute, and
+      the bar shows replace. Both apps wrote the effective mode back to the
+      store from an effect, because this path read the stored one and refused
+      every note as a two-note chord a flute cannot play.
+    */
+    const store = fluteStore();
+    store.getState().setEditMode('stack');
+    const [first] = allNotes(store.getState().score!).filter(
+      n => n.startTick === 0
+    );
+    getMusicPositionSource().moveTo(0);
+
+    expect(
+      insertChordAtCaret(store, [{ step: 'D', accidental: 0, octave: 5 }])
+    ).toBe(true);
+
+    const atZero = allNotes(store.getState().score!).filter(
+      n => n.trackId === first.trackId && n.startTick === 0
+    );
+    expect(atZero.map(n => n.pitch)).toEqual([
+      { step: 'D', accidental: 0, octave: 5 },
+    ]);
+    expect(store.getState().toasts).toEqual([]);
+    // The stored choice survives: it is the person's, and a piano gets it back.
+    expect(store.getState().editMode).toBe('stack');
+  });
+
+  it('counts only the notes a write leaves behind against the instrument', () => {
+    /*
+      A violin plays two notes at once. Over an existing note, a double stop in
+      replace mode replaces it — two notes sound — while the same double stop
+      stacked would put three under one bow. Counting every note at the tick
+      regardless of mode refused both.
+    */
+    const violin = () => {
+      const store = makeStore();
+      const track = store.getState().score!.tracks[0];
+      store
+        .getState()
+        .dispatchCommand(
+          changeTrackPropsCommand(
+            track.id,
+            { midiProgram: 40, instrumentName: 'Violin' },
+            'violin'
+          )
+        );
+      getMusicPositionSource().moveTo(0);
+      return store;
+    };
+    const doubleStop = [
+      { step: 'D' as const, accidental: 0 as const, octave: 5 },
+      { step: 'F' as const, accidental: 0 as const, octave: 5 },
+    ];
+
+    const replacing = violin();
+    replacing.getState().setEditMode('replace');
+    expect(insertChordAtCaret(replacing, doubleStop)).toBe(true);
+
+    const inserting = violin();
+    inserting.getState().setEditMode('insert');
+    expect(insertChordAtCaret(inserting, doubleStop)).toBe(true);
+
+    const stacking = violin();
+    stacking.getState().setEditMode('stack');
+    expect(insertChordAtCaret(stacking, doubleStop)).toBe(false);
+  });
+
+  it('still refuses a real chord on a flute', () => {
+    const store = fluteStore();
+    getMusicPositionSource().moveTo(0);
+    expect(
+      insertChordAtCaret(store, [
+        { step: 'D', accidental: 0, octave: 5 },
+        { step: 'F', accidental: 0, octave: 5 },
+      ])
+    ).toBe(false);
+  });
+});
+
 describe('hairpins and arpeggios', () => {
   it('toggleHairpin marks the ends of the selection and nothing between', () => {
     const store = makeStore();
@@ -1238,9 +1339,43 @@ describe('the note panel', () => {
     const note = allNotes(store.getState().score!)[0];
     const score = store.getState().score;
 
-    moveNoteToTick(store, note.id, note.startTick);
+    expect(moveNoteToTick(store, note.id, note.startTick)).toBe(false);
 
     expect(store.getState().score).toBe(score);
+  });
+
+  /*
+    The bar/beat field in both inspectors has to tell a move that happened from
+    one that did not: it re-seeds its drafts from the score either way, so a
+    refusal with no answer back is indistinguishable from a move, and the field
+    snaps to the old position with nothing said.
+  */
+  it('moveNoteToTick answers true for a move that landed', () => {
+    const store = makeStore();
+    const note = allNotes(store.getState().score!)[0];
+    const ppq = store.getState().score!.ppq;
+
+    expect(moveNoteToTick(store, note.id, note.startTick + ppq)).toBe(true);
+    expect(
+      (findEvent(store.getState().score!, note.id) as NoteEvent).startTick
+    ).toBe(note.startTick + ppq);
+  });
+
+  it('moveNoteToTick answers false for a note that is not there', () => {
+    const store = makeStore();
+    expect(moveNoteToTick(store, 'no-such-note' as UUID, 0)).toBe(false);
+  });
+
+  it('moveNoteToTick answers false for a move the playback lock refused', () => {
+    // The score is immutable while the transport plays, and a move is content.
+    const store = makeStore();
+    const note = allNotes(store.getState().score!)[0];
+    const ppq = store.getState().score!.ppq;
+    store.setTransport('playing');
+    const before = store.getState().score;
+
+    expect(moveNoteToTick(store, note.id, note.startTick + ppq)).toBe(false);
+    expect(store.getState().score).toBe(before);
   });
 
   it('setDynamic marks the level and takes the marking off again', () => {
@@ -1517,5 +1652,54 @@ describe('selectNotes', () => {
     const before = store.getState().selection;
     selectNotes(store, []);
     expect(store.getState().selection).toBe(before);
+  });
+});
+
+describe('playing the keyboard', () => {
+  beforeEach(() => {
+    resetMusicPosition();
+  });
+
+  function keyboardStore() {
+    const store = testEditingStore();
+    store.getState().setScore(createEmptyScore({ title: 'K', measures: 4 }));
+    return store;
+  }
+
+  it('takes the written length from the hold when there was one', () => {
+    const store = keyboardStore();
+    // Deliberately not what the hold says, so the assertion can tell them
+    // apart: a measured tap wins over the toolbar.
+    store.getState().setSnapGrid('whole');
+    const ppq = store.getState().score!.ppq;
+
+    playKeyGroup(store, { midis: [60], heldMs: 500 }); // a quarter at 120bpm
+
+    expect(allNotes(store.getState().score!)[0]!.durationTicks).toBe(ppq);
+  });
+
+  it("takes the toolbar's note value when the group was never held", () => {
+    /*
+      An assistive activation is an instant — it arrives as one event with no
+      duration in it — so there is no hold to read a length off. The write is
+      the length the duration buttons would have produced instead of one
+      invented from a made-up `heldMs`.
+    */
+    const store = keyboardStore();
+    store.getState().setSnapGrid('half');
+    const ppq = store.getState().score!.ppq;
+
+    playKeyGroup(store, { midis: [60], heldMs: null });
+
+    expect(allNotes(store.getState().score!)[0]!.durationTicks).toBe(ppq * 2);
+  });
+
+  it('writes nothing while the transport plays, held or not', () => {
+    const store = keyboardStore();
+    store.setTransport('playing');
+
+    playKeyGroup(store, { midis: [60], heldMs: null });
+
+    expect(allNotes(store.getState().score!)).toHaveLength(0);
   });
 });

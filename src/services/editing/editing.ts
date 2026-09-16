@@ -120,7 +120,11 @@ import { getMusicPositionSource } from '@sudobility/music_types';
 function caretTick(): number {
   return getMusicPositionSource().reportedTick;
 }
-import { selectActiveTrackId } from '../../store/selectors.js';
+import {
+  selectActiveTrackId,
+  selectCanStack,
+  selectEffectiveEditMode,
+} from '../../store/selectors.js';
 import { selectVisibleTrackIds } from '../../store/selectors.js';
 import {
   clipboardSpan,
@@ -131,15 +135,16 @@ import {
   scoreWithTracks,
 } from '@sudobility/music_types';
 import type {
-  RegenerateRegionRequest,
+  EditMode,
+  PreparedReplacement,
   ReplaceScope,
+  ReplaceSubmission,
 } from '@sudobility/music_types';
 import {
   gmMaxPolyphony,
   insertWithRippleCommand,
   trackMaxPolyphony,
 } from '@sudobility/music_types';
-import type { EditMode } from '../../store/slices/ui-slice.js';
 import { ticksFor } from '@sudobility/music_types';
 import {
   MAX_OCTAVE,
@@ -385,12 +390,18 @@ export function defaultInsertPitch<T extends EditingState>(
  * How many notes already sound at `tick` on `trackId`, counting only those
  * that start there — a chord is notes sharing a start, not notes overlapping.
  */
-function chordSizeAt(score: Score, trackId: UUID, tick: number): number {
+function chordSizeAt(
+  score: Score,
+  trackId: UUID,
+  tick: number,
+  exceptVoiceIndex?: number
+): number {
   const track = findTrack(score, trackId);
   if (!track) return 0;
   let count = 0;
   for (const measure of track.measures) {
-    for (const voice of measure.voices) {
+    for (const [index, voice] of measure.voices.entries()) {
+      if (index === exceptVoiceIndex) continue;
       for (const event of voice.events) {
         if (isNoteEvent(event) && event.startTick === tick) count += 1;
       }
@@ -446,7 +457,29 @@ export function insertChordAtCaret<T extends EditingState>(
   if (!target) return false;
 
   const track = findTrack(state.score, target.trackId);
-  const existing = chordSizeAt(state.score, target.trackId, target.startTick);
+  // The mode in effect, not the stored one: stack left chosen on a part that
+  // cannot play a chord reads as replace, which is what the bar shows.
+  const mode = options.mode ?? selectEffectiveEditMode(state);
+  /*
+    The notes that will still be sounding at the tick once this write lands —
+    which depends on the mode, and counting every note there regardless is what
+    refused a single note typed over another on a flute in *any* mode. Stack
+    keeps them all. Replace clears the span in the target voice, so only the
+    other voices' notes remain. Insert pushes everything from the tick onward
+    out of the way (`makeRoom` moves the whole track), so the chord stands
+    alone.
+  */
+  const existing =
+    mode === 'stack'
+      ? chordSizeAt(state.score, target.trackId, target.startTick)
+      : mode === 'replace'
+        ? chordSizeAt(
+            state.score,
+            target.trackId,
+            target.startTick,
+            target.voiceIndex
+          )
+        : 0;
   const total = existing + pitches.length;
 
   // Through the track rather than its program: a percussion track's program is
@@ -471,8 +504,6 @@ export function insertChordAtCaret<T extends EditingState>(
 
   const { duration, advanceCaret = false } = options;
   const durationTicks = ticksFor(duration ?? state.snapGrid, state.score.ppq);
-
-  const mode = options.mode ?? state.editMode;
 
   // `replace` has to clear the span itself. Leaving it to reflow does not
   // work: notes sharing a start AND a duration cluster into a chord, so a
@@ -742,23 +773,6 @@ export function caretToScoreEdge<T extends EditingState>(
   );
 }
 
-/**
- * Moves the caret to the first beat of `bar`, counted from 1.
- *
- * Used by Go to bar, which is how a long score is navigated without scrolling
- * to find the place by eye.
- */
-export function caretToBar<T extends EditingState>(
-  store: EditorStoreApi<T>,
-  bar: number
-): boolean {
-  const state = store.getState();
-  const measure = state.score?.tracks[0]?.measures[Math.round(bar) - 1];
-  if (!measure) return false;
-  getMusicPositionSource().moveTo(measure.startTick);
-  return true;
-}
-
 // ---- delete / duplicate --------------------------------------------------------
 
 /** Deletes the currently selected notes (spec §7 "Delete: delete selected notes") and clears the selection. No-op if no notes are selected. */
@@ -1013,21 +1027,33 @@ export function changeDuration<T extends EditingState>(
  * Rounded and clamped to MIDI's 0-127 here rather than in each panel: the web
  * field clamped and the native one did not, so a typed 200 was "as loud as it
  * goes" in one app and a validation error in the other. A non-number writes
- * nothing.
+ * nothing, and neither does a velocity every selected note already has — a
+ * field committed on blur without an edit is not an undo entry.
+ *
+ * Returns whether the score changed, like `setTimeSignature`: false for no
+ * selection, a non-number, a no-op, or a write the playback lock refused. A
+ * panel holding a draft needs that answer to know whether to reset it.
  */
 export function changeVelocity<T extends EditingState>(
   store: EditorStoreApi<T>,
   velocity: number
-): void {
+): boolean {
   const state = store.getState();
-  if (!state.score || !Number.isFinite(velocity)) return;
-  const ids = selectedNoteIds(state.score, state.selection);
-  if (ids.length === 0) return;
+  const score = state.score;
+  if (!score || !Number.isFinite(velocity)) return false;
+  const ids = selectedNoteIds(score, state.selection);
+  if (ids.length === 0) return false;
   const clamped = Math.max(0, Math.min(127, Math.round(velocity)));
+  const unchanged = ids.every(id => {
+    const event = findEvent(score, id);
+    return event && isNoteEvent(event) && event.velocity === clamped;
+  });
+  if (unchanged) return false;
   dispatchTracked(
     store,
     changeVelocityCommand(ids, clamped, commandLabel('changeVelocity'))
   );
+  return store.getState().score !== score;
 }
 
 /** Sets (or clears, with `undefined`) the selected notes' articulation. No-op if no notes are selected. */
@@ -1217,27 +1243,28 @@ export function toggleGlissando<T extends EditingState>(
  * Trimmed, and blank clears — a field left holding a space must not store a
  * finger that draws as nothing. When every selected note already carries the
  * result, nothing is written: a field blurred without an edit is not an undo
- * entry.
+ * entry. Returns whether the score changed (see `changeVelocity`).
  */
 export function setFingering<T extends EditingState>(
   store: EditorStoreApi<T>,
   fingering: string | undefined
-): void {
+): boolean {
   const state = store.getState();
   const score = state.score;
-  if (!score) return;
+  if (!score) return false;
   const ids = selectedNoteIds(score, state.selection);
-  if (ids.length === 0) return;
+  if (ids.length === 0) return false;
   const next = fingering?.trim() || undefined;
   const unchanged = ids.every(id => {
     const event = findEvent(score, id);
     return event && isNoteEvent(event) && event.fingering === next;
   });
-  if (unchanged) return;
+  if (unchanged) return false;
   dispatchTracked(
     store,
     setFingeringCommand(ids, next, commandLabel('setFingering'))
   );
+  return store.getState().score !== score;
 }
 
 export function toggleTie<T extends EditingState>(
@@ -1329,10 +1356,18 @@ export function repairAllIssues<T extends EditingState>(
  * one length for the chord, because measuring each key separately gives notes
  * differing by milliseconds, and same-start notes of differing durations
  * delete each other rather than stacking.
+ *
+ * **`null` means the group was never held at all**, which is what an assistive
+ * activation is: it arrives as one event with no duration in it. That writes
+ * the toolbar's current note value — the same length its duration buttons
+ * would produce — rather than a length invented from a made-up hold. A hold
+ * cannot be faked from the toolbar either: `durationForTap` only ever lands on
+ * a plain value, so a dotted or triplet setting has no `heldMs` that maps back
+ * to it.
  */
 export function playKeyGroup<T extends EditingState>(
   store: EditorStoreApi<T>,
-  played: { midis: readonly number[]; heldMs: number }
+  played: { midis: readonly number[]; heldMs: number | null }
 ): void {
   const state = store.getState();
   const score = state.score;
@@ -1363,7 +1398,15 @@ export function playKeyGroup<T extends EditingState>(
     // Wrapped, not point-free: `map` would pass the index into `midiToPitch`'s
     // key-signature parameter.
     played.midis.map(midi => midiToPitch(midi)),
-    { duration: durationForTap(played.heldMs, bpm), advanceCaret: true }
+    {
+      // Omitted rather than passed as undefined when there was no hold, so
+      // `insertChordAtCaret` falls through to `snapGrid` — the toolbar's own
+      // value — by the same default every other caller gets.
+      ...(played.heldMs === null
+        ? {}
+        : { duration: durationForTap(played.heldMs, bpm) }),
+      advanceCaret: true,
+    }
   );
 }
 
@@ -1585,10 +1628,7 @@ export function chooseDuration<T extends EditingState>(
 export function canStackOnActiveTrack<T extends EditingState>(
   store: EditorStoreApi<T>
 ): boolean {
-  const state = store.getState();
-  const activeTrackId = selectActiveTrackId(state);
-  const track = state.score?.tracks.find(t => t.id === activeTrackId) ?? null;
-  return track === null || trackMaxPolyphony(track) > 1;
+  return selectCanStack(store.getState());
 }
 
 /**
@@ -1803,18 +1843,28 @@ export function resizeNotes<T extends EditingState>(
   );
 }
 
-/** Move one note to a tick, leaving its pitch alone. */
+/**
+ * Move one note to a tick, leaving its pitch alone.
+ *
+ * Returns whether the score changed (see `setNotePitch`, `setFingering`):
+ * false for a note that is not there, the tick it already sits on, and — the
+ * one a panel has to act on — a write the playback lock refused. Both
+ * inspectors' bar/beat fields used to call this for its effect alone and reset
+ * their drafts unconditionally, so a refused move looked exactly like one that
+ * happened: the field snapped back to the old position with nothing said, which
+ * reads as the editor having lost the keystroke.
+ */
 export function moveNoteToTick<T extends EditingState>(
   store: EditorStoreApi<T>,
   noteId: UUID,
   tick: number
-): void {
+): boolean {
   const score = store.getState().score;
-  if (!score) return;
+  if (!score) return false;
   const event = findEvent(score, noteId);
-  if (!event) return;
+  if (!event) return false;
   const deltaTicks = tick - event.startTick;
-  if (deltaTicks === 0) return;
+  if (deltaTicks === 0) return false;
   dispatchTracked(
     store,
     moveNotesCommand(
@@ -1823,6 +1873,7 @@ export function moveNoteToTick<T extends EditingState>(
       commandLabel('moveNotes')
     )
   );
+  return store.getState().score !== score;
 }
 
 /**
@@ -1878,17 +1929,21 @@ export function displayedPitchForNote(
  * The panel shows what is *drawn*; the score stores what *sounds*. On a B-flat
  * clarinet read in written pitch those differ by a tone, and storing the drawn
  * value writes a note that draws where it was typed and sounds wrong.
+ *
+ * Returns whether the score changed (see `changeVelocity`): false for a note
+ * that is not there, a non-number octave, the pitch the note already has, an
+ * out-of-range refusal, or the playback lock.
  */
 export function setNotePitch<T extends EditingState>(
   store: EditorStoreApi<T>,
   noteId: UUID,
   edited: Pitch,
   pitchDisplay: 'concert' | 'written'
-): void {
+): boolean {
   const score = store.getState().score;
-  if (!score) return;
+  if (!score) return false;
   const event = findEvent(score, noteId);
-  if (!event || !isNoteEvent(event)) return;
+  if (!event || !isNoteEvent(event)) return false;
   const track = findTrack(score, event.trackId);
   const key = measureOfNote(score, event)?.keySignature ?? {
     fifths: 0,
@@ -1897,7 +1952,7 @@ export function setNotePitch<T extends EditingState>(
   // The octave the panel may name, clamped rather than refused, the way every
   // numeric field treats a value past its end. The native field clamped to
   // -1..9 and the web one did not clamp at all.
-  if (!Number.isFinite(edited.octave)) return;
+  if (!Number.isFinite(edited.octave)) return false;
   const bounded: Pitch = {
     ...edited,
     octave: Math.max(
@@ -1909,6 +1964,13 @@ export function setNotePitch<T extends EditingState>(
     pitchDisplay === 'written' && track
       ? soundingPitchForTrack(bounded, track, key)
       : bounded;
+  // Spelling as well as sound: re-spelling D-sharp as E-flat is an edit.
+  if (
+    next.step === event.pitch.step &&
+    next.accidental === event.pitch.accidental &&
+    next.octave === event.pitch.octave
+  )
+    return false;
   // Against `next`, never `edited`: on a B-flat trumpet read in written pitch
   // the two differ by a tone, and the compass is a sounding one. Checking what
   // was typed would refuse a written D#6 the instrument plays and accept a
@@ -1921,11 +1983,12 @@ export function setNotePitch<T extends EditingState>(
       'changeNote'
     )
   )
-    return;
+    return false;
   dispatchTracked(
     store,
     changePitchCommand([noteId], next, commandLabel('changePitch'))
   );
+  return store.getState().score !== score;
 }
 
 // ---- dragging on the sheet ---------------------------------------------------
@@ -2189,36 +2252,6 @@ export function selectRegeneratedInRange<T extends EditingState>(
 }
 
 // ---- generation and export scope ---------------------------------------------
-
-/** What the Replace dialog collects. The region it applies to is derived, not asked for. */
-export type ReplaceSubmission = {
-  instruction: string;
-  /**
-   * Which generation backend writes the replacement.
-   *
-   * Collected here rather than read from a setting, for the same reason the
-   * Generate dialog asks: a replacement is the cheapest thing in the system to
-   * run twice and compare by ear, which is exactly when you want to change
-   * backends for one call without changing it for everything.
-   */
-  variant?: string;
-  style?: string;
-  mood?: string;
-  complexity?: 'simple' | 'moderate' | 'complex';
-  constraints: {
-    preserveBoundaryNotes: boolean;
-    preserveHarmony: boolean;
-    preserveRhythm: boolean;
-    preserveMelody: boolean;
-  };
-};
-
-/** A replacement ready to submit: which kind of job, the request, and the region it will overwrite. */
-export type PreparedReplacement = {
-  kind: 'replace-notes' | 'replace-measures' | 'replace-track';
-  request: RegenerateRegionRequest;
-  range: ScoreRange;
-};
 
 /**
  * Turn a Replace submission into the request the server actually needs.

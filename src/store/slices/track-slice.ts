@@ -19,7 +19,12 @@
  * go through it, so the edit lock (no content changes while the transport
  * plays) and the undo history apply exactly as they do to any other edit.
  */
-import type { Clef, Track, UUID } from '@sudobility/music_types';
+import type {
+  Clef,
+  ScoreMetadataPatch,
+  TrackMixPatch,
+  UUID,
+} from '@sudobility/music_types';
 import {
   changeClefCommand,
   changeTrackPropsCommand,
@@ -34,11 +39,6 @@ import { instrumentChoiceFor } from '@sudobility/music_types';
 import { clampPan, clampVolume, quantizeMix } from '@sudobility/music_types';
 import type { EditingState, SliceArgs } from '../editing-store.js';
 import { commandLabel } from '../../services/editing/copy.js';
-
-/** The mixing properties, which stay editable while the transport plays. */
-export type TrackMixPatch = Partial<
-  Pick<Track, 'volume' | 'pan' | 'muted' | 'solo'>
->;
 
 /**
  * Why an instrument change did nothing.
@@ -115,13 +115,6 @@ export type TrackSlice = {
    * writes nothing. Returns whether it wrote.
    */
   setScoreMetadata: (patch: ScoreMetadataPatch, label?: string) => boolean;
-};
-
-/** The metadata fields a user can edit. `createdAt` is the score's, not theirs. */
-export type ScoreMetadataPatch = {
-  title?: string;
-  composer?: string;
-  description?: string;
 };
 
 export const createTrackSlice = <T extends EditingState>({

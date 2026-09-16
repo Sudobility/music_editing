@@ -11,56 +11,23 @@
  *
  * Keys, never words: this package holds no strings in any language.
  */
-import type { Score, ScoreSelection } from '@sudobility/music_types';
+import type {
+  ClipboardData,
+  Score,
+  ScoreContextAction,
+  ScoreContextMenuModel,
+  ScoreSelection,
+} from '@sudobility/music_types';
+import {
+  SCORE_CONTEXT_ACTIONS,
+  SCORE_CONTEXT_ACTION_LABEL_KEY,
+} from '@sudobility/music_types';
 import type {
   EditingState,
   EditingStoreApi,
 } from '../../store/editing-store.js';
-import type { ClipboardData } from '../../store/slices/selection-slice.js';
 import { clearSelected, deleteSelected, selectAll } from './editing.js';
 import { canPasteInto, selectionKind } from './selection-kind.js';
-
-/** Every entry, in the order the menu shows them. */
-export const SCORE_CONTEXT_ACTIONS = [
-  'copy',
-  'cut',
-  'clear',
-  'delete',
-  'paste',
-  'selectAll',
-] as const;
-
-export type ScoreContextAction = (typeof SCORE_CONTEXT_ACTIONS)[number];
-
-/** The label each entry is read as. A record, so a new action fails to compile here. */
-export const SCORE_CONTEXT_ACTION_LABEL_KEY: Record<
-  ScoreContextAction,
-  string
-> = {
-  copy: 'editor.copy',
-  cut: 'editor.cut',
-  clear: 'editor.clear',
-  delete: 'editor.deleteSelection',
-  paste: 'editor.paste',
-  selectAll: 'editor.selectAllNotes',
-};
-
-export type ScoreContextMenuEntry = {
-  action: ScoreContextAction;
-  labelKey: string;
-  enabled: boolean;
-};
-
-export type ScoreContextMenuModel = {
-  /** The menu's accessible name / sheet title. */
-  titleKey: string;
-  /**
-   * What every entry acts on — "Track", "Bars", "Notes" — or null with nothing
-   * selected. `count` is for the plural; translate with `{ count }`.
-   */
-  subject: { key: string; count: number } | null;
-  entries: readonly ScoreContextMenuEntry[];
-};
 
 /**
  * The menu for this selection.

@@ -14,7 +14,7 @@ import {
   selectForContextMenu,
   startPointerGesture,
 } from './score-press.js';
-import type { ScorePressModifiers } from './score-press.js';
+import type { ScorePressModifiers } from '@sudobility/music_types';
 
 const plain: ScorePressModifiers = {
   shift: false,
@@ -97,6 +97,7 @@ describe('routeScorePress', () => {
       {
         kind: 'stave',
         trackId: target.trackId,
+        measureIndex: 0,
         tick: target.startTick + 1,
         pitch: null,
       },
@@ -121,7 +122,7 @@ describe('routeScorePress', () => {
 
     routeScorePress(
       store,
-      { kind: 'stave', trackId: 'x', tick: 0, pitch: null },
+      { kind: 'stave', trackId: 'x', measureIndex: 0, tick: 0, pitch: null },
       { ...plain, mod: true, pointTick: 1440 }
     );
     expect(store.getState().selection.range?.endTick).toBe(1440);
@@ -143,6 +144,7 @@ describe('routeScorePress', () => {
         kind: 'note',
         eventIds: [note.id],
         trackId: note.trackId,
+        measureIndex: 0,
         tick: note.startTick,
       },
       plain
@@ -164,7 +166,13 @@ describe('routeScorePress', () => {
 
     routeScorePress(
       store,
-      { kind: 'note', eventIds: [b!.id], trackId: b!.trackId, tick: 0 },
+      {
+        kind: 'note',
+        eventIds: [b!.id],
+        trackId: b!.trackId,
+        measureIndex: 0,
+        tick: 0,
+      },
       { ...plain, shift: true }
     );
 
@@ -184,6 +192,7 @@ describe('routeScorePress', () => {
       {
         kind: 'stave',
         trackId: track.id,
+        measureIndex: 0,
         tick: last.startTick,
         pitch: { step: 'B', accidental: -1, octave: 5 },
       },
@@ -213,6 +222,7 @@ describe('routeScorePress', () => {
       {
         kind: 'stave',
         trackId: second.id,
+        measureIndex: 0,
         tick: 960,
         pitch: { step: 'E', accidental: 0, octave: 4 },
       },
@@ -270,7 +280,13 @@ describe('selectForContextMenu', () => {
     });
     selectForContextMenu(
       store,
-      { kind: 'note', eventIds: [b!.id], trackId: b!.trackId, tick: 0 },
+      {
+        kind: 'note',
+        eventIds: [b!.id],
+        trackId: b!.trackId,
+        measureIndex: 0,
+        tick: 0,
+      },
       null
     );
     expect(store.getState().selection.eventIds).toEqual([a!.id, b!.id]);
@@ -281,7 +297,13 @@ describe('selectForContextMenu', () => {
     const note = allNotes(score)[4]!;
     selectForContextMenu(
       store,
-      { kind: 'note', eventIds: [note.id], trackId: note.trackId, tick: 0 },
+      {
+        kind: 'note',
+        eventIds: [note.id],
+        trackId: note.trackId,
+        measureIndex: 0,
+        tick: 0,
+      },
       null
     );
     expect(store.getState().selection.eventIds).toEqual([note.id]);
@@ -306,7 +328,13 @@ describe('selectForContextMenu', () => {
     });
     selectForContextMenu(
       store,
-      { kind: 'stave', trackId: note.trackId, tick: 960, pitch: null },
+      {
+        kind: 'stave',
+        trackId: note.trackId,
+        measureIndex: 0,
+        tick: 960,
+        pitch: null,
+      },
       null
     );
     expect(store.getState().selection.eventIds).toEqual([note.id]);
@@ -323,6 +351,7 @@ describe('classifyPointerDown', () => {
         kind: 'note',
         eventIds: [a!.id, b!.id],
         trackId: a!.trackId,
+        measureIndex: 0,
         tick: 0,
       },
       { alt: true, shift: false }
@@ -345,7 +374,13 @@ describe('classifyPointerDown', () => {
     });
     const gesture = classifyPointerDown(
       store.getState(),
-      { kind: 'note', eventIds: [b!.id], trackId: b!.trackId, tick: 0 },
+      {
+        kind: 'note',
+        eventIds: [b!.id],
+        trackId: b!.trackId,
+        measureIndex: 0,
+        tick: 0,
+      },
       { alt: true, shift: false }
     );
     expect(gesture).toMatchObject({ kind: 'move', selectChord: null });
@@ -361,7 +396,13 @@ describe('classifyPointerDown', () => {
     });
     const gesture = classifyPointerDown(
       store.getState(),
-      { kind: 'note', eventIds: [note.id], trackId: note.trackId, tick: 0 },
+      {
+        kind: 'note',
+        eventIds: [note.id],
+        trackId: note.trackId,
+        measureIndex: 0,
+        tick: 0,
+      },
       { alt: false, shift: false }
     );
     expect(gesture).toEqual({
@@ -377,7 +418,13 @@ describe('classifyPointerDown', () => {
     expect(
       classifyPointerDown(
         store.getState(),
-        { kind: 'note', eventIds: [note.id], trackId: note.trackId, tick: 0 },
+        {
+          kind: 'note',
+          eventIds: [note.id],
+          trackId: note.trackId,
+          measureIndex: 0,
+          tick: 0,
+        },
         { alt: false, shift: true }
       )
     ).toEqual({ kind: 'box', additive: true });
@@ -400,7 +447,13 @@ describe('startPointerGesture', () => {
     const activeBefore = store.getState().activeTrackId;
     const gesture = startPointerGesture(
       store,
-      { kind: 'note', eventIds: [note.id], trackId: note.trackId, tick: 0 },
+      {
+        kind: 'note',
+        eventIds: [note.id],
+        trackId: note.trackId,
+        measureIndex: 0,
+        tick: 0,
+      },
       { alt: true, shift: false }
     );
     expect(gesture.kind).toBe('move');

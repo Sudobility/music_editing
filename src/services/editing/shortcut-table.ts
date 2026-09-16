@@ -18,26 +18,7 @@
   the bindings exactly as the first one did. It sits beside `shortcuts.ts`,
   which is what it is checked against.
 */
-
-export type ShortcutRow = {
-  /** The keys, written out. Mutually exclusive with `keysKey`. */
-  keys?: string;
-  /** A translated description of the gesture, where it is not a key chord. */
-  keysKey?: string;
-  actionKey: string;
-};
-
-/** Which part of the editor a shortcut belongs to — the docs group by these. */
-export const SHORTCUT_GROUPS = [
-  'transport',
-  'editing',
-  'selection',
-  'noteEntry',
-  'marks',
-  'caret',
-  'pointer',
-] as const;
-export type ShortcutGroup = (typeof SHORTCUT_GROUPS)[number];
+import type { ShortcutGroup, ShortcutRow } from '@sudobility/music_types';
 
 export const SHORTCUTS: ReadonlyArray<ShortcutRow & { group: ShortcutGroup }> =
   [

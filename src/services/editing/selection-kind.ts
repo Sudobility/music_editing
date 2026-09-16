@@ -12,10 +12,11 @@
  * track selection. This is the same priority the inspector already uses to pick
  * its opening tab, and it is stated once here rather than a second time there.
  */
-import type { ScoreSelection } from '@sudobility/music_types';
-import type { ClipboardData } from '../../store/slices/selection-slice.js';
-
-export type SelectionKind = 'notes' | 'measures' | 'track';
+import type {
+  ClipboardData,
+  ScoreSelection,
+  SelectionKind,
+} from '@sudobility/music_types';
 
 export function selectionKind(selection: ScoreSelection): SelectionKind | null {
   if (selection.eventIds.length > 0) return 'notes';

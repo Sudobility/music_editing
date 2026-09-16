@@ -28,6 +28,12 @@ const WEB_ONLY =
  * the same library on both platforms — it is the *renderer* that differs — so
  * a hook that owns an editing rule and renders nothing runs unchanged in both.
  * Anything that reaches for a DOM renderer is still rejected here.
+ *
+ * `music_codecs` is deliberately **not** on it. This package is editing; the
+ * file-format layer is not its business, and a fact it needs about a file —
+ * the project file's extension, say — is vocabulary, which lives in
+ * music_types. It was briefly allowed here for exactly that one constant, which
+ * was the wrong fix: the constant moved instead.
  */
 const ALLOWED_PACKAGES = new Set([
   '@sudobility/music_types',
@@ -89,6 +95,44 @@ describe('platform independence', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  /**
+   * Named outright rather than left to the allow-list, because each is a
+   * mistake somebody has already made once. `music_codecs` is the file-format
+   * layer, not editing. `music_player` is sound: the player binding that used
+   * to live here typed the player structurally to avoid importing it, and the
+   * right answer was that binding a player is not editing at all — it moved to
+   * music_lib.
+   */
+  it('depends on neither music_codecs nor music_player', () => {
+    const forbidden = ['@sudobility/music_codecs', '@sudobility/music_player'];
+    const offenders: string[] = [];
+    for (const file of sources().filter(
+      f => !f.endsWith('platform-free.test.ts')
+    )) {
+      // Any quoted specifier, not only `from '…'`: a dynamic `import('…')`, a
+      // `vi.mock('…')` or a `require("…")` is as much a dependency as a static
+      // import, and a type-only import is one too. Comments are stripped so a
+      // sentence naming the package is not mistaken for a reach for it.
+      const raw = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^[ \t]*\/\/.*$/gm, '');
+      for (const [, spec] of raw.matchAll(/['"`](@sudobility\/[^'"`]+)['"`]/g))
+        if (
+          forbidden.some(name => spec === name || spec.startsWith(`${name}/`))
+        )
+          offenders.push(`${file}: ${spec}`);
+    }
+    expect(offenders).toEqual([]);
+
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as Record<
+      string,
+      Record<string, string> | undefined
+    >;
+    for (const field of ['dependencies', 'peerDependencies', 'devDependencies'])
+      for (const name of forbidden)
+        expect(pkg[field]?.[name], `${name} in ${field}`).toBeUndefined();
   });
 
   it('depends on nothing web-only at the package level', () => {

@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_ZOOM,
   MIN_ZOOM,
-  QUANTIZE_GRIDS,
-  QUANTIZE_GRID_SHORT,
   clampZoom,
   zoomIn,
   zoomOut,
 } from './view-settings.js';
+import { QUANTIZE_GRIDS, QUANTIZE_GRID_SHORT } from '@sudobility/music_types';
 
 describe('zoom', () => {
   it('cannot be stepped past either limit', () => {
