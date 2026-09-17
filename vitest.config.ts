@@ -9,6 +9,9 @@ export default defineConfig({
     // Node's ESM loader is stricter than what the sibling packages are built
     // for — extensionless relative imports, the house style — so vitest hands
     // them to Vite rather than to Node.
-    server: { deps: { inline: [/@sudobility\//] } },
+    // Keep shared packages external so Vitest uses their published ESM entry
+    // points. Inlining music_types makes Zod's named export disappear under
+    // Vitest's dependency transform.
+    server: { deps: { external: [/@sudobility\//] } },
   },
 });

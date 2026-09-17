@@ -83,6 +83,19 @@ export const createScoreSlice = <T extends EditingState>({
 }: SliceArgs<T>): ScoreSlice => {
   const historyManager = new HistoryManager();
 
+  // Mute and solo are listening preferences, not score data. Keep them in the
+  // score-shaped client state for the live mixer, but exclude them when
+  // deciding whether an edit needs a server save. This also covers undo/redo
+  // and prevents a UI-only action from becoming dirty through another path.
+  function persistedScoreFingerprint(score: Score): string {
+    return JSON.stringify({
+      ...score,
+      tracks: score.tracks.map(
+        ({ muted: _muted, solo: _solo, ...track }) => track
+      ),
+    });
+  }
+
   function syncHistoryMirrors(state: {
     canUndo: boolean;
     canRedo: boolean;
@@ -113,7 +126,12 @@ export const createScoreSlice = <T extends EditingState>({
         state.validationIssues = validateScore(next);
         syncHistoryMirrors(state);
       });
-      changed();
+      get().localUiChanged?.();
+      if (
+        persistedScoreFingerprint(score) !== persistedScoreFingerprint(next)
+      ) {
+        changed();
+      }
     },
 
     undo: () => {
@@ -129,7 +147,12 @@ export const createScoreSlice = <T extends EditingState>({
         state.validationIssues = validateScore(previous);
         syncHistoryMirrors(state);
       });
-      changed();
+      get().localUiChanged?.();
+      if (
+        persistedScoreFingerprint(score) !== persistedScoreFingerprint(previous)
+      ) {
+        changed();
+      }
     },
 
     redo: () => {
@@ -143,7 +166,12 @@ export const createScoreSlice = <T extends EditingState>({
         state.validationIssues = validateScore(next);
         syncHistoryMirrors(state);
       });
-      changed();
+      get().localUiChanged?.();
+      if (
+        persistedScoreFingerprint(score) !== persistedScoreFingerprint(next)
+      ) {
+        changed();
+      }
     },
 
     setScore: (score, options = {}) => {

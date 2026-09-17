@@ -72,7 +72,10 @@ export type EditingState = ScoreSlice &
   TrackSlice &
   UiSlice &
   TransportAwareness &
-  SelectionObservers;
+  SelectionObservers & {
+    /** Optional host-owned persistence for client-only UI state. */
+    localUiChanged?: NotifyChanged;
+  };
 
 /**
  * What a slice creator is handed.

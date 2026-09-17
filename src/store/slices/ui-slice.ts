@@ -136,6 +136,7 @@ export type UiSlice = {
 
 export const createUiSlice = <T extends EditingState>({
   set,
+  get,
   changed,
 }: SliceArgs<T>): UiSlice => ({
   noteInput: false,
@@ -175,7 +176,7 @@ export const createUiSlice = <T extends EditingState>({
     // rather than here when the fallback-to-first-track rule matters — this
     // reports the raw value, which is what was actually set.
     getMusicSelectionSource().setActiveTrackId(trackId);
-    if (revealed) changed();
+    if (revealed) get().localUiChanged?.();
   },
 
   setVisibleTracks: trackIds => {
@@ -184,11 +185,13 @@ export const createUiSlice = <T extends EditingState>({
       state.visibleTrackIds = [...trackIds];
     });
     changed();
+    get().localUiChanged?.();
   },
   setZoom: zoom => {
     set(state => {
       state.zoom = zoom;
     });
+    get().localUiChanged?.();
   },
   setSnapGrid: grid => {
     set(state => {
