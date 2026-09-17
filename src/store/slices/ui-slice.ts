@@ -137,7 +137,6 @@ export type UiSlice = {
 export const createUiSlice = <T extends EditingState>({
   set,
   get,
-  changed,
 }: SliceArgs<T>): UiSlice => ({
   noteInput: false,
   activeTrackId: null,
@@ -184,7 +183,6 @@ export const createUiSlice = <T extends EditingState>({
     set(state => {
       state.visibleTrackIds = [...trackIds];
     });
-    changed();
     get().localUiChanged?.();
   },
   setZoom: zoom => {

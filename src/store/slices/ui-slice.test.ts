@@ -25,11 +25,11 @@ describe('ui-slice', () => {
   });
 
   describe('visible tracks', () => {
-    it('setVisibleTracks stores the list and marks the project dirty', () => {
+    it('setVisibleTracks stores the list without dirtying the score', () => {
       const store = testEditingStore();
       store.getState().setVisibleTracks(['a', 'b']);
       expect(store.getState().visibleTrackIds).toEqual(['a', 'b']);
-      expect(store.dirtyCount() > 0).toBe(true);
+      expect(store.dirtyCount()).toBe(0);
     });
 
     it('setVisibleTracks refuses an empty list', () => {
