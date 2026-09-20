@@ -81,6 +81,36 @@ describe('selectToolbarAvailability', () => {
     expect(a.fermata).toBe(false);
   });
 
+  it('offers lyrics only for the selected vocal track', () => {
+    const store = testEditingStore(twoTrackScore());
+    const [first, second] = store.getState().score!.tracks;
+
+    expect(selectToolbarAvailability(store.getState()).enterLyrics).toBe(false);
+
+    store
+      .getState()
+      .dispatchCommand(
+        changeTrackPropsCommand(
+          second!.id,
+          { midiProgram: 53, instrumentName: 'Voice Oohs' },
+          'make voice'
+        )
+      );
+    store.getState().setActiveTrack(second!.id);
+    expect(selectToolbarAvailability(store.getState()).enterLyrics).toBe(false);
+
+    const voiceNote = second!.measures[0]!.voices[0]!.events[0]!;
+    store.getState().setSelection({
+      eventIds: [voiceNote.id],
+      measureIds: [],
+      trackIds: [second!.id],
+    });
+    expect(selectToolbarAvailability(store.getState()).enterLyrics).toBe(true);
+
+    store.getState().setActiveTrack(first!.id);
+    expect(selectToolbarAvailability(store.getState()).enterLyrics).toBe(false);
+  });
+
   it('needs two notes for a span and one for a mark on a note', () => {
     const store = testEditingStore(twinkleScore());
     const [first, second] = notesOf(store);

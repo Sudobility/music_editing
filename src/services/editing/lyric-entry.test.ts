@@ -121,15 +121,18 @@ describe('splitLyricSeparator', () => {
 describe('beginLyricEntry and applyLyricStep', () => {
   beforeEach(() => resetMusicPosition());
 
-  it('starts at the first note at or after the caret on the active track', () => {
+  it('starts on the selected notes of the active track', () => {
     const store = testEditingStore(twinkleScore());
+    const note =
+      store.getState().score!.tracks[0]!.measures[1]!.voices[0]!.events[0]!;
+    store
+      .getState()
+      .setSelection({ eventIds: [note.id], measureIds: [], trackIds: [] });
     getMusicPositionSource().moveTo(481);
     const entry = beginLyricEntry(store);
     expect(entry).not.toBeNull();
-    expect(entry!.notes.length).toBeGreaterThan(1);
-    expect(entry!.notes[entry!.startIndex]!.startTick).toBeGreaterThanOrEqual(
-      481
-    );
+    expect(entry!.notes).toHaveLength(1);
+    expect(entry!.notes[entry!.startIndex]!.id).toBe(note.id);
     expect(entry!.state).toEqual({
       index: entry!.startIndex,
       count: entry!.notes.length,
@@ -146,12 +149,17 @@ describe('beginLyricEntry and applyLyricStep', () => {
 
   it('writes the step onto the note it names', () => {
     const store = testEditingStore(twinkleScore());
+    const note =
+      store.getState().score!.tracks[0]!.measures[0]!.voices[0]!.events[0]!;
+    store
+      .getState()
+      .setSelection({ eventIds: [note.id], measureIds: [], trackIds: [] });
     const entry = beginLyricEntry(store)!;
     const step = lyricEntryStep(entry.state, 'hyphen', 'Twin');
     applyLyricStep(store, entry.notes, step);
 
-    const note = findEvent(store.getState().score!, entry.notes[0]!.id);
-    expect(note && isNoteEvent(note) ? note.lyric : null).toEqual({
+    const written = findEvent(store.getState().score!, entry.notes[0]!.id);
+    expect(written && isNoteEvent(written) ? written.lyric : null).toEqual({
       text: 'Twin',
       syllabic: 'begin',
     });

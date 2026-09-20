@@ -92,6 +92,7 @@ import {
   trackWrittenTransposition,
   transposeKeySignature,
   transposePitch,
+  insertBlankMeasuresCommand,
 } from '@sudobility/music_types';
 import {
   chordSelection,
@@ -895,6 +896,34 @@ export function addMeasure<T extends EditingState>(
 ): void {
   if (!store.getState().score) return;
   dispatchTracked(store, addMeasureCommand(commandLabel('addMeasure')));
+}
+
+export type InsertBarsPosition = 'before' | 'after';
+
+/** Inserts blank bars around the bar containing the current caret. */
+export function insertBlankMeasuresAtCaret<T extends EditingState>(
+  store: EditorStoreApi<T>,
+  count: number,
+  position: InsertBarsPosition
+): { startIndex: number; count: number } | null {
+  const score = store.getState().score;
+  if (!score) return null;
+  const track = score.tracks[0];
+  if (!track || track.measures.length === 0) return null;
+  const tick = Math.max(0, caretTick());
+  const foundIndex = track.measures.findIndex(
+    measure =>
+      tick >= measure.startTick &&
+      tick < measure.startTick + measure.durationTicks
+  );
+  const measureIndex = foundIndex >= 0 ? foundIndex : track.measures.length - 1;
+  const amount = Math.max(1, Math.floor(count));
+  const startIndex = position === 'before' ? measureIndex : measureIndex + 1;
+  dispatchTracked(
+    store,
+    insertBlankMeasuresCommand(startIndex, amount, commandLabel('insertBars'))
+  );
+  return { startIndex, count: amount };
 }
 
 /**

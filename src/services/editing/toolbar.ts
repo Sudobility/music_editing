@@ -26,6 +26,7 @@ import {
   EDITOR_MORE_ACTIONS,
   EDIT_MODE_OPTIONS,
   TOOLBAR_CONTROLS,
+  isVocalInstrumentValue,
 } from '@sudobility/music_types';
 import { indexOfBarNumber, ticksFor } from '@sudobility/music_types';
 import { getMusicPositionSource } from '@sudobility/music_types';
@@ -33,7 +34,12 @@ import type {
   EditingState,
   EditingStoreApi,
 } from '../../store/editing-store.js';
-import { selectActiveTrackId, selectCanStack } from '../../store/selectors.js';
+import {
+  selectActiveTrackId,
+  selectCanStack,
+  selectSelectedNotes,
+  selectSelectedTrack,
+} from '../../store/selectors.js';
 import {
   addBlankTrack,
   addMeasure,
@@ -62,6 +68,13 @@ function computeAvailability(state: EditingState): ToolbarAvailability {
     something the command knows how to place.
   */
   const hasSelection = notes > 0 || state.selection.measureIds.length > 0;
+  const selectedNotes = selectSelectedNotes(state);
+  const selectedTrack = selectSelectedTrack(state);
+  const selectedTrackIsVoice =
+    selectedTrack !== null &&
+    isVocalInstrumentValue(String(selectedTrack.midiProgram)) &&
+    selectedNotes.length > 0 &&
+    selectedNotes.every(note => note.trackId === selectedTrack.id);
 
   return {
     addTrack: canEdit,
@@ -104,7 +117,7 @@ function computeAvailability(state: EditingState): ToolbarAvailability {
     */
     addMeasure: canEdit,
     deleteMeasure: canEdit,
-    enterLyrics: canEdit,
+    enterLyrics: canEdit && selectedTrackIsVoice,
     glissando: canEdit && notes >= 2,
   };
 }
@@ -269,14 +282,20 @@ export function runAddTrackChoice<T extends EditingState>(
 export function runMoreAction<T extends EditingState>(
   store: EditingStoreApi<T>,
   action: EditorMoreAction,
-  host: { goToBar?: () => void; enterLyrics?: () => void }
+  host: {
+    addMeasure?: () => void;
+    goToBar?: () => void;
+    enterLyrics?: () => void;
+  }
 ): void {
   const entry = EDITOR_MORE_ACTIONS.find(a => a.value === action);
   if (!entry || !selectToolbarAvailability(store.getState())[entry.control])
     return;
   if (action === 'select-all') selectAll(store);
-  else if (action === 'add-measure') addMeasure(store);
-  else if (action === 'delete-measure') deleteMeasureAtCaret(store);
+  else if (action === 'add-measure') {
+    if (host.addMeasure) host.addMeasure();
+    else addMeasure(store);
+  } else if (action === 'delete-measure') deleteMeasureAtCaret(store);
   else if (action === 'go-to-bar') host.goToBar?.();
   else if (action === 'enter-lyrics') host.enterLyrics?.();
   else toggleGlissando(store);

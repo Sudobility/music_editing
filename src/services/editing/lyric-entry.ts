@@ -26,26 +26,22 @@ import type {
   LyricStep,
   NoteEvent,
 } from '@sudobility/music_types';
-import {
-  getMusicPosition,
-  noteIndexAtOrAfter,
-  trackNotesInOrder,
-} from '@sudobility/music_types';
+import { isNoteEvent, trackNotesInOrder } from '@sudobility/music_types';
 import type {
   EditingState,
   EditingStoreApi,
 } from '../../store/editing-store.js';
-import { selectActiveTrackId } from '../../store/selectors.js';
+import {
+  selectActiveTrackId,
+  selectSelectedNotes,
+} from '../../store/selectors.js';
 import { writeLyric } from './editing.js';
 
 /**
- * Begin entry on the active track, at the first note at or after the caret.
+ * Begin entry on the selected notes of the active vocal track.
  *
- * `notes` is a snapshot of the line in tick order; the syllable already on a
- * note is read live through `lyricTextAt`, because every syllable typed since
- * entry began has gone into the score without changing this array. `null`
- * with nothing to write under — no score, no notes on the track — and while
- * the transport plays, when the store would refuse every syllable.
+ * `notes` is a snapshot of the selected notes in track order. `null` with no
+ * selected notes on the active track, or while the transport plays.
  */
 export function beginLyricEntry<T extends EditingState>(
   store: EditingStoreApi<T>
@@ -54,9 +50,16 @@ export function beginLyricEntry<T extends EditingState>(
   if (!state.score || state.state === 'playing') return null;
   const trackId = selectActiveTrackId(state);
   if (!trackId) return null;
-  const notes = trackNotesInOrder(state.score, trackId);
-  if (notes.length === 0) return null;
-  const startIndex = noteIndexAtOrAfter(notes, getMusicPosition().reportedTick);
+  const selected = selectSelectedNotes(state).filter(
+    note => note.trackId === trackId
+  );
+  if (selected.length === 0) return null;
+  const selectedIds = new Set(selected.map(note => note.id));
+  const notes = trackNotesInOrder(state.score, trackId).filter(note =>
+    selectedIds.has(note.id)
+  );
+  if (notes.length === 0 || notes.some(note => !isNoteEvent(note))) return null;
+  const startIndex = 0;
   return {
     notes,
     startIndex,
