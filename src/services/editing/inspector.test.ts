@@ -50,9 +50,21 @@ function selectFirstNote(store: ReturnType<typeof makeStore>): NoteEvent {
 }
 
 describe('inspector tabs', () => {
-  it('are in the web order: Score, Track, Note, Bar', () => {
-    expect(INSPECTOR_TABS).toEqual(['score', 'track', 'note', 'measure']);
+  it('are in the web order: Score, Track, Note, Bar, Unplugged', () => {
+    expect(INSPECTOR_TABS).toEqual([
+      'score',
+      'track',
+      'note',
+      'measure',
+      'unplugged',
+    ]);
     expect(INSPECTOR_TAB_LABEL_KEY.measure).toBe('inspector.measure');
+    expect(INSPECTOR_TAB_LABEL_KEY.unplugged).toBe('inspector.unplugged');
+  });
+
+  it('never auto-selects Unplugged from a selection, the same as Score', () => {
+    const empty = { eventIds: [], measureIds: [], trackIds: [] };
+    expect(defaultInspectorTab(empty)).not.toBe('unplugged');
   });
 
   it('default to what the selection is of, and to Track when nothing is', () => {

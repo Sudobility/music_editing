@@ -19,6 +19,7 @@ import { createScoreSlice } from './slices/score-slice.js';
 import { createSelectionSlice } from './slices/selection-slice.js';
 import { createTrackSlice } from './slices/track-slice.js';
 import { createUiSlice } from './slices/ui-slice.js';
+import { createUnpluggedSlice } from './slices/unplugged-slice.js';
 
 export type CreateEditingStoreOptions = {
   /**
@@ -42,6 +43,7 @@ export function createEditingStore(options: CreateEditingStoreOptions = {}) {
         ...createSelectionSlice<EditingState>({ set, get, changed }),
         ...createTrackSlice<EditingState>({ set, get, changed }),
         ...createUiSlice<EditingState>({ set, get, changed }),
+        ...createUnpluggedSlice<EditingState>({ set, get, changed }),
       };
     })
   );

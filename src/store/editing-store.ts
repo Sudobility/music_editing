@@ -23,6 +23,7 @@ import type { ScoreSlice } from './slices/score-slice.js';
 import type { SelectionSlice } from './slices/selection-slice.js';
 import type { TrackSlice } from './slices/track-slice.js';
 import type { UiSlice } from './slices/ui-slice.js';
+import type { UnpluggedSlice } from './slices/unplugged-slice.js';
 
 /**
  * What the editing engine needs to know about the transport, and nothing more.
@@ -71,6 +72,7 @@ export type EditingState = ScoreSlice &
   SelectionSlice &
   TrackSlice &
   UiSlice &
+  UnpluggedSlice &
   TransportAwareness &
   SelectionObservers & {
     /** Optional host-owned persistence for client-only UI state. */

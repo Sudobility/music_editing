@@ -103,6 +103,18 @@ export type UiSlice = {
   dialogs: Record<string, boolean>;
   toasts: Toast[];
 
+  /**
+   * Whether the Unplugged tab is the one currently showing.
+   *
+   * Ephemeral, like `activeTrackId` above — not persisted, resets to `false`
+   * on load. This is what a playback binding reads to decide whether a
+   * track's live volume/pan comes from its `volume`/`pan` fields or from the
+   * Unplugged arrangement (`unpluggedMixes` in music_lib): the arrangement
+   * itself lives on `Score.unplugged` and is always saved, but it is only
+   * *in effect* for playback while this is true.
+   */
+  unpluggedActive: boolean;
+
   setActiveTrack: (trackId: UUID | null) => void;
   setNoteInput: (on: boolean) => void;
 
@@ -122,6 +134,7 @@ export type UiSlice = {
   setPitchDisplay: (display: PitchDisplay) => void;
   setEditMode: (mode: EditMode) => void;
   setActiveVoice: (voiceIndex: number) => void;
+  setUnpluggedActive: (active: boolean) => void;
   openDialog: (id: string) => void;
   closeDialog: (id: string) => void;
   toggleDialog: (id: string) => void;
@@ -148,6 +161,7 @@ export const createUiSlice = <T extends EditingState>({
   activeVoiceIndex: 0,
   dialogs: {},
   toasts: [],
+  unpluggedActive: false,
 
   setNoteInput: on => {
     set(state => {
@@ -211,6 +225,11 @@ export const createUiSlice = <T extends EditingState>({
     // `voices[-1]`, which is not a voice and not an error either.
     set(state => {
       state.activeVoiceIndex = Math.max(0, Math.floor(voiceIndex));
+    });
+  },
+  setUnpluggedActive: active => {
+    set(state => {
+      state.unpluggedActive = active;
     });
   },
   openDialog: id => {
