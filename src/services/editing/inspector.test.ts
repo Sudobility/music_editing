@@ -50,21 +50,19 @@ function selectFirstNote(store: ReturnType<typeof makeStore>): NoteEvent {
 }
 
 describe('inspector tabs', () => {
-  it('are in the web order: Score, Track, Note, Bar, Unplugged', () => {
-    expect(INSPECTOR_TABS).toEqual([
-      'score',
-      'track',
-      'note',
-      'measure',
-      'unplugged',
-    ]);
+  it('are in the web order: Score, Track, Note, Bar', () => {
+    expect(INSPECTOR_TABS).toEqual(['score', 'track', 'note', 'measure']);
     expect(INSPECTOR_TAB_LABEL_KEY.measure).toBe('inspector.measure');
-    expect(INSPECTOR_TAB_LABEL_KEY.unplugged).toBe('inspector.unplugged');
   });
 
-  it('never auto-selects Unplugged from a selection, the same as Score', () => {
-    const empty = { eventIds: [], measureIds: [], trackIds: [] };
-    expect(defaultInspectorTab(empty)).not.toBe('unplugged');
+  it('no longer offer Unplugged: the stage arrangement is the Spatial view now', () => {
+    // It was a fifth tab here. It moved to the playback bar's Spatial toggle
+    // (music_spatial / music_spatial_rn), which shows the same arrangement as
+    // a map inside the 3D stage rather than behind a tab a reader had to
+    // know to open. This pins the removal so it is not quietly re-added as a
+    // tab by a package that still remembers it.
+    expect(INSPECTOR_TABS).not.toContain('unplugged');
+    expect(Object.keys(INSPECTOR_TAB_LABEL_KEY)).not.toContain('unplugged');
   });
 
   it('default to what the selection is of, and to Track when nothing is', () => {
