@@ -289,6 +289,40 @@ describe('the playback edit lock', () => {
     expect(store.getState().score).toBe(edited);
   });
 
+  it('refuses content, undo and redo while the edit lock is held, and mix still runs', () => {
+    // A generation job owns the score for as long as it runs: its partials
+    // land through `setScore`, and an edit accepted meanwhile is an edit of
+    // music about to be replaced.
+    const store = freshStore();
+    store.getState().dispatchCommand(addMeasureCommand('Add measure'));
+    const edited = store.getState().score!;
+    const trackId = edited.tracks[0].id;
+
+    store.getState().setEditLocked(true);
+    expect(store.getState().editLocked).toBe(true);
+    store.getState().dispatchCommand(addMeasureCommand('Add measure'));
+    expect(store.getState().score).toBe(edited);
+    store.getState().undo();
+    expect(store.getState().score).toBe(edited);
+    store.getState().redo();
+    expect(store.getState().score).toBe(edited);
+    store
+      .getState()
+      .dispatchCommand(
+        changeTrackPropsCommand(
+          trackId,
+          { muted: true },
+          'Change track properties'
+        )
+      );
+    expect(store.getState().score!.tracks[0].muted).toBe(true);
+
+    store.getState().setEditLocked(false);
+    const before = store.getState().score;
+    store.getState().dispatchCommand(addMeasureCommand('Add measure'));
+    expect(store.getState().score).not.toBe(before);
+  });
+
   it('accepts content again once playback stops', () => {
     const store = freshStore();
     store.setTransport('playing');

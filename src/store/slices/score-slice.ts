@@ -46,6 +46,17 @@ export type ScoreSlice = {
   canRedo: boolean;
   undoLabel: string | null;
   redoLabel: string | null;
+  /**
+   * True while something outside this editor owns the score — a generation
+   * job writing it on the server, whose partial results arrive through
+   * `setScore` and whose final one replaces whatever was here. A content
+   * command, an undo or a redo accepted meanwhile would be an edit of music
+   * about to be overwritten, and its autosave would be refused by the server
+   * anyway; mix commands still run, as they do while playing, because they
+   * change nothing the server holds.
+   */
+  editLocked: boolean;
+  setEditLocked: (locked: boolean) => void;
 
   /** Runs `cmd` through the store's `HistoryManager`, then updates `score`/`validationIssues`/undo-redo mirrors and marks the current project dirty. A no-op if there is no `score` yet. */
   dispatchCommand: (cmd: ScoreCommand) => void;
@@ -71,9 +82,10 @@ export type ScoreSlice = {
  */
 function commandAllowed(
   cmd: ScoreCommand,
-  playbackState: TransportState
+  playbackState: TransportState,
+  editLocked: boolean
 ): boolean {
-  return playbackState !== 'playing' || cmd.kind === 'mix';
+  return (playbackState !== 'playing' && !editLocked) || cmd.kind === 'mix';
 }
 
 export const createScoreSlice = <T extends EditingState>({
@@ -115,11 +127,19 @@ export const createScoreSlice = <T extends EditingState>({
     canRedo: false,
     undoLabel: null,
     redoLabel: null,
+    editLocked: false,
+
+    setEditLocked: locked => {
+      if (get().editLocked === locked) return;
+      set(state => {
+        state.editLocked = locked;
+      });
+    },
 
     dispatchCommand: cmd => {
-      const { score, state } = get();
+      const { score, state, editLocked } = get();
       if (!score) return;
-      if (!commandAllowed(cmd, state)) return;
+      if (!commandAllowed(cmd, state, editLocked)) return;
       const next = historyManager.execute(cmd, score);
       set(state => {
         state.score = next;
@@ -138,7 +158,12 @@ export const createScoreSlice = <T extends EditingState>({
       const score = get().score;
       // Undo is always content: it reverses whatever was done, and while
       // playing nothing that needs reversing can have happened.
-      if (!score || get().state === 'playing' || !historyManager.canUndo)
+      if (
+        !score ||
+        get().state === 'playing' ||
+        get().editLocked ||
+        !historyManager.canUndo
+      )
         return;
       const previous = historyManager.undo(score);
       if (previous === null) return;
@@ -157,7 +182,12 @@ export const createScoreSlice = <T extends EditingState>({
 
     redo: () => {
       const score = get().score;
-      if (!score || get().state === 'playing' || !historyManager.canRedo)
+      if (
+        !score ||
+        get().state === 'playing' ||
+        get().editLocked ||
+        !historyManager.canRedo
+      )
         return;
       const next = historyManager.redo(score);
       if (next === null) return;
