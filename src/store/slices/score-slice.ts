@@ -95,17 +95,78 @@ export const createScoreSlice = <T extends EditingState>({
 }: SliceArgs<T>): ScoreSlice => {
   const historyManager = new HistoryManager();
 
-  // Mute and solo are listening preferences, not score data. Keep them in the
-  // score-shaped client state for the live mixer, but exclude them when
-  // deciding whether an edit needs a server save. This also covers undo/redo
-  // and prevents a UI-only action from becoming dirty through another path.
-  function persistedScoreFingerprint(score: Score): string {
-    return JSON.stringify({
-      ...score,
-      tracks: score.tracks.map(
-        ({ muted: _muted, solo: _solo, ...track }) => track
-      ),
-    });
+  /**
+   * Whether an edit changed anything the server keeps.
+   *
+   * Mute and solo are listening preferences, not score data. Keep them in the
+   * score-shaped client state for the live mixer, but exclude them when
+   * deciding whether an edit needs a server save. This also covers undo/redo
+   * and prevents a UI-only action from becoming dirty through another path.
+   *
+   * Decided by identity, never by serialising: this used to `JSON.stringify`
+   * both scores — the whole score, twice, on every command — and a command
+   * runs on every animation frame while the listener walks the Unplugged
+   * stage or an instrument is dragged across its map, so on a real score
+   * that was milliseconds of serialisation per frame for a yes/no answer.
+   * Commands are pure and the store freezes what it holds, so an object that
+   * kept its identity kept its contents; a field that changed identity is
+   * taken as changed, which errs towards saving, never towards losing one.
+   */
+  function persistedScoreChanged(before: Score, after: Score): boolean {
+    if (before === after) return false;
+    const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+    for (const key of keys) {
+      if (key === 'tracks') continue;
+      if (
+        (before as unknown as Record<string, unknown>)[key] !==
+        (after as unknown as Record<string, unknown>)[key]
+      )
+        return true;
+    }
+    if (before.tracks === after.tracks) return false;
+    if (before.tracks.length !== after.tracks.length) return true;
+    for (let i = 0; i < before.tracks.length; i += 1) {
+      const a = before.tracks[i]!;
+      const b = after.tracks[i]!;
+      if (a === b) continue;
+      const trackKeys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      for (const key of trackKeys) {
+        if (key === 'muted' || key === 'solo') continue;
+        if (
+          (a as unknown as Record<string, unknown>)[key] !==
+          (b as unknown as Record<string, unknown>)[key]
+        )
+          return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * The issues for `next`, reusing the last result when nothing the
+   * validator reads has changed.
+   *
+   * `validateScore` reads the tracks and the tempo map and nothing else (its
+   * id check covers those and the score id), so a command that touched only
+   * `score.unplugged` — every step of a walk, every frame of a map drag —
+   * used to pay a full validation walk, with its quadratic overlap pass, to
+   * produce a new array equal to the old one. Keeping the old array's
+   * identity is also what lets a host subscribed to `validationIssues` skip
+   * a render for such a command.
+   */
+  function issuesFor(
+    previous: Score | null,
+    previousIssues: ValidationIssue[],
+    next: Score
+  ): ValidationIssue[] {
+    if (
+      previous &&
+      previous.tracks === next.tracks &&
+      previous.tempoMap === next.tempoMap &&
+      previous.id === next.id
+    )
+      return previousIssues;
+    return validateScore(next);
   }
 
   function syncHistoryMirrors(state: {
@@ -137,21 +198,18 @@ export const createScoreSlice = <T extends EditingState>({
     },
 
     dispatchCommand: cmd => {
-      const { score, state, editLocked } = get();
+      const { score, state, editLocked, validationIssues } = get();
       if (!score) return;
       if (!commandAllowed(cmd, state, editLocked)) return;
       const next = historyManager.execute(cmd, score);
+      const issues = issuesFor(score, validationIssues, next);
       set(state => {
         state.score = next;
-        state.validationIssues = validateScore(next);
+        state.validationIssues = issues;
         syncHistoryMirrors(state);
       });
       get().localUiChanged?.();
-      if (
-        persistedScoreFingerprint(score) !== persistedScoreFingerprint(next)
-      ) {
-        changed();
-      }
+      if (persistedScoreChanged(score, next)) changed();
     },
 
     undo: () => {
@@ -167,17 +225,14 @@ export const createScoreSlice = <T extends EditingState>({
         return;
       const previous = historyManager.undo(score);
       if (previous === null) return;
+      const issues = issuesFor(score, get().validationIssues, previous);
       set(state => {
         state.score = previous;
-        state.validationIssues = validateScore(previous);
+        state.validationIssues = issues;
         syncHistoryMirrors(state);
       });
       get().localUiChanged?.();
-      if (
-        persistedScoreFingerprint(score) !== persistedScoreFingerprint(previous)
-      ) {
-        changed();
-      }
+      if (persistedScoreChanged(score, previous)) changed();
     },
 
     redo: () => {
@@ -191,17 +246,14 @@ export const createScoreSlice = <T extends EditingState>({
         return;
       const next = historyManager.redo(score);
       if (next === null) return;
+      const issues = issuesFor(score, get().validationIssues, next);
       set(state => {
         state.score = next;
-        state.validationIssues = validateScore(next);
+        state.validationIssues = issues;
         syncHistoryMirrors(state);
       });
       get().localUiChanged?.();
-      if (
-        persistedScoreFingerprint(score) !== persistedScoreFingerprint(next)
-      ) {
-        changed();
-      }
+      if (persistedScoreChanged(score, next)) changed();
     },
 
     setScore: (score, options = {}) => {

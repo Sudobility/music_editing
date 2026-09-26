@@ -8,6 +8,7 @@ import {
   addMeasureCommand,
   changeMetadataCommand,
   changeTrackPropsCommand,
+  setUnpluggedListenerCommand,
 } from '@sudobility/music_types';
 import { deleteEventsCommand } from '@sudobility/music_types';
 import { validateScore } from '@sudobility/music_types';
@@ -168,6 +169,69 @@ describe('score-slice', () => {
       const state = store.getState();
       expect(state.score).not.toBe(score);
       expect(state.validationIssues).toEqual(validateScore(state.score!));
+    });
+
+    it('keeps the validation issues by identity for a command that touches nothing the validator reads', () => {
+      // A listener move on the Unplugged stage is dispatched once per
+      // animation frame while walking or dragging. The validator reads the
+      // tracks and the tempo map; neither changed, so the old array stands —
+      // and a host subscribed to it does not render for the move.
+      const store = testEditingStore();
+      store.getState().setScore(twinkleScore());
+      const before = store.getState().validationIssues;
+      const tracks = store.getState().score!.tracks;
+
+      store
+        .getState()
+        .dispatchCommand(
+          setUnpluggedListenerCommand({ x: 1, z: 2 }, 'Move listener')
+        );
+
+      const state = store.getState();
+      expect(state.score?.unplugged?.listener).toMatchObject({ x: 1, z: 2 });
+      expect(state.validationIssues).toBe(before);
+      expect(state.score?.tracks).toBe(tracks);
+    });
+
+    it('marks the project dirty for a listener move, since the arrangement is saved with the score', () => {
+      const store = testEditingStore();
+      store.getState().setScore(twinkleScore());
+      const before = store.dirtyCount();
+
+      store
+        .getState()
+        .dispatchCommand(
+          setUnpluggedListenerCommand({ x: 1, z: 2 }, 'Move listener')
+        );
+
+      expect(store.dirtyCount()).toBeGreaterThan(before);
+    });
+
+    it('judges dirtiness by identity, ignoring mute and solo on a track', () => {
+      // A track whose only changed fields are `muted`/`solo` is not a
+      // persisted change; a moved note is. (A mute *command* still dirties
+      // the project today, because it also stamps `metadata` — this pins
+      // the comparison, not that command.)
+      const store = testEditingStore();
+      const score = twinkleScore();
+      store.getState().setScore(score);
+      const before = store.dirtyCount();
+
+      store.setState(state => {
+        state.score = {
+          ...score,
+          tracks: score.tracks.map((track, i) =>
+            i === 0 ? { ...track, muted: true } : track
+          ),
+        };
+      });
+      store
+        .getState()
+        .dispatchCommand(
+          setUnpluggedListenerCommand({ facingDeg: 90 }, 'Turn listener')
+        );
+      // The listener turn is what dirtied it, exactly once.
+      expect(store.dirtyCount()).toBe(before + 1);
     });
   });
 
