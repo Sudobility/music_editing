@@ -37,7 +37,8 @@ import { closeGap, makeRoom } from '@sudobility/music_types';
 import { transformCommand } from '@sudobility/music_types';
 import type { EditingState, SliceArgs } from '../editing-store.js';
 import { getMusicSelectionSource } from '../../services/selection/singleton.js';
-import { selectEffectiveEditMode } from '../selectors.js';
+import { getMusicPositionSource } from '@sudobility/music_types';
+import { selectActiveTrackId, selectEffectiveEditMode } from '../selectors.js';
 
 export type SelectionSlice = {
   selection: ScoreSelection;
@@ -86,9 +87,9 @@ export type SelectionSlice = {
    * decides — see the cut dialog.
    */
   cutSelection: (options?: { closeGap?: boolean }) => void;
-  /** Pastes the clipboard's notes, anchored at `atTick` (defaults to the tick they were copied from) onto the track implied by the current selection (falling back to the score's first track). No-op if the clipboard is empty or there's no score. */
   /**
-   * Pastes the clipboard at `atTick`.
+   * Pastes notes at `atTick` (the current cursor by default) onto the selected
+   * or active track. Other clipboard kinds use their selected target.
    *
    * `scope` decides what happens to music already there: `replace` clears the
    * span first, `insert` pushes it later. Omitted, it follows `editMode` — so
@@ -171,10 +172,11 @@ function sliceOf(score: Score, from: number, to: number): MeasureSlice {
   };
 }
 
-/** The track a paste should target: the current selection's own track scope if it has one, else the track of a selected event, else the score's first track. */
+/** The selected track, selected note's track, or the currently active track. */
 function resolvePasteTrackId(
   score: Score,
-  selection: ScoreSelection
+  selection: ScoreSelection,
+  activeTrackId: UUID | null
 ): UUID | null {
   if (selection.trackIds.length > 0) return selection.trackIds[0];
   for (const eventId of selection.eventIds) {
@@ -183,7 +185,7 @@ function resolvePasteTrackId(
   }
   const range = selectionToRange(score, selection);
   if (range && range.trackIds.length > 0) return range.trackIds[0];
-  return score.tracks[0]?.id ?? null;
+  return activeTrackId ?? score.tracks[0]?.id ?? null;
 }
 
 export const createSelectionSlice = <T extends EditingState>({
@@ -424,7 +426,11 @@ export const createSelectionSlice = <T extends EditingState>({
       }
 
       if (clipboard.events.length === 0) return;
-      const trackId = resolvePasteTrackId(score, selection);
+      const trackId = resolvePasteTrackId(
+        score,
+        selection,
+        selectActiveTrackId(get())
+      );
       if (!trackId) return;
       // Notes pasted onto a different part are new to its instrument, and are
       // refused if it cannot play them, exactly as typing them would be. Notes
@@ -451,7 +457,7 @@ export const createSelectionSlice = <T extends EditingState>({
         )
       )
         return;
-      const anchorTick = atTick ?? clipboard.anchorTick;
+      const anchorTick = atTick ?? getMusicPositionSource().reportedTick;
 
       // How much time the clipboard occupies, measured from its own earliest
       // start — the same span the paste will cover once anchored.

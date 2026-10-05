@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { testEditingStore } from '../../test/store.js';
 import { emptySelection } from '@sudobility/music_types';
 import { twinkleScore, twoTrackScore } from '@sudobility/music_types/test';
-import { allNotes, changeTrackPropsCommand } from '@sudobility/music_types';
+import {
+  allNotes,
+  changeTrackPropsCommand,
+  getMusicPositionSource,
+} from '@sudobility/music_types';
 import type { ScoreSelection } from '@sudobility/music_types';
 import { createEditingStore } from '../create-editing-store.js';
+import { pasteWouldPrompt } from '../../services/editing/editing.js';
 
 describe('selection-slice', () => {
   describe('setSelection / clearSelection', () => {
@@ -203,6 +208,67 @@ describe('selection-slice', () => {
       expect(trebleTrack.measures[0].voices[0].events.length).toBeGreaterThan(
         0
       );
+    });
+
+    it('pastes copied notes at the cursor on another active track after selection clears', () => {
+      const store = testEditingStore();
+      const score = twoTrackScore();
+      store.getState().setScore(score);
+      const source = allNotes(score)
+        .filter(note => note.trackId === score.tracks[0]!.id)
+        .slice(0, 2);
+      expect(source).toHaveLength(2);
+      store.getState().setSelection({
+        eventIds: source.map(note => note.id),
+        measureIds: [],
+        trackIds: [],
+      });
+      store.getState().copySelection();
+
+      const destinationId = score.tracks[1]!.id;
+      store.getState().setActiveTrack(destinationId);
+      store.getState().clearSelection();
+      getMusicPositionSource().moveTo(1920);
+      const beforeIds = new Set(
+        allNotes(store.getState().score!).map(n => n.id)
+      );
+      store.getState().paste(undefined, { scope: 'stack' });
+
+      const pasted = allNotes(store.getState().score!).filter(
+        note => !beforeIds.has(note.id)
+      );
+      expect(pasted).toHaveLength(2);
+      expect(pasted.every(note => note.trackId === destinationId)).toBe(true);
+      expect(pasted.map(note => note.startTick).sort((a, b) => a - b)).toEqual(
+        source
+          .map(note => 1920 + note.startTick - source[0]!.startTick)
+          .sort((a, b) => a - b)
+      );
+      expect(pasted.map(note => note.pitch)).toEqual(source.map(n => n.pitch));
+    });
+
+    it('decides whether to prompt using the cursor destination', () => {
+      const store = testEditingStore();
+      const score = twoTrackScore();
+      store.getState().setScore(score);
+      const note = allNotes(score).find(
+        n => n.trackId === score.tracks[0]!.id
+      )!;
+      store.getState().setSelection({
+        eventIds: [note.id],
+        measureIds: [],
+        trackIds: [],
+      });
+      store.getState().copySelection();
+      store.getState().clearSelection();
+
+      getMusicPositionSource().moveTo(note.startTick);
+      expect(pasteWouldPrompt(store)).toBe(true);
+      const end = Math.max(
+        ...allNotes(score).map(n => n.startTick + n.durationTicks)
+      );
+      getMusicPositionSource().moveTo(end + 480);
+      expect(pasteWouldPrompt(store)).toBe(false);
     });
 
     it('paste is a no-op when the clipboard is empty', () => {

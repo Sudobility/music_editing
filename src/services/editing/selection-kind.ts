@@ -35,15 +35,15 @@ export function clipboardKind(
 /**
  * Whether Paste should be offered at all.
  *
- * Only when the two are the same kind: pasting a track over a run of notes has
- * no meaning anybody could predict, and offering it as a live control that then
- * does something arbitrary is worse than not offering it. Nothing selected and
- * a full clipboard is also a no — paste has to land somewhere.
+ * Notes land at the cursor, including when clicking empty score space has
+ * cleared the selection. Measures and tracks still need a selected target of
+ * their own kind.
  */
 export function canPasteInto(
   selection: ScoreSelection,
   clipboard: ClipboardData | null
 ): boolean {
+  if (clipboard?.kind === 'notes') return true;
   const kind = selectionKind(selection);
   return kind !== null && kind === clipboardKind(clipboard);
 }

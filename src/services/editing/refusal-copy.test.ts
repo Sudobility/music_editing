@@ -153,7 +153,6 @@ describe('an out-of-range refusal hands the host its facts', () => {
       'transpose',
       'changeAccidental',
       'changeNote',
-      'moveNote',
     ]);
   });
 

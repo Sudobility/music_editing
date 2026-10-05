@@ -70,7 +70,7 @@ describe('scoreContextMenuModel', () => {
     ).toEqual({ key: 'editor.subjectTrack', count: 1 });
   });
 
-  it('offers paste only on a matching kind, and only reads while playing', () => {
+  it('offers note paste at an empty cursor, and only reads while playing', () => {
     const selection = { eventIds: ['a'], measureIds: [], trackIds: [] };
     const clipboard = { kind: 'notes' as const, events: [], anchorTick: 0 };
     expect(
@@ -80,12 +80,12 @@ describe('scoreContextMenuModel', () => {
     expect(
       enabled(
         scoreContextMenuModel({
-          selection: { eventIds: [], measureIds: ['m'], trackIds: [] },
+          selection: emptySelection(),
           clipboard,
           playing: false,
         })
       ).paste
-    ).toBe(false);
+    ).toBe(true);
     expect(
       enabled(scoreContextMenuModel({ selection, clipboard, playing: true }))
     ).toEqual({

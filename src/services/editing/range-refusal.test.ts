@@ -10,8 +10,11 @@ import {
   allNotes,
   emptySelection,
   changePitchCommand,
+  getMusicPositionSource,
   midiToPitch,
   pitchToMidi,
+  shiftDiatonic,
+  trackKeyboardRange,
 } from '@sudobility/music_types';
 import type { NoteEvent, Score } from '@sudobility/music_types';
 import { twinkleScore } from '@sudobility/music_types/test';
@@ -19,6 +22,7 @@ import { testEditingStore } from '../../test/store.js';
 import { editingCopy, setEditingCopy } from './copy.js';
 import {
   changeAccidental,
+  boundedPitchDragSteps,
   commitPitchDrag,
   relocateNotes,
   setNotePitch,
@@ -214,11 +218,11 @@ describe('pasting', () => {
       .setSelection({ ...emptySelection(), eventIds: [first.id] });
     store.getState().copySelection();
 
-    store
-      .getState()
-      .setSelection({ ...emptySelection(), trackIds: ['violin'] });
+    store.getState().setActiveTrack('violin');
+    store.getState().clearSelection();
+    getMusicPositionSource().moveTo(1920);
     const before = JSON.stringify(store.getState().score);
-    store.getState().paste(0);
+    store.getState().paste();
     expect(JSON.stringify(store.getState().score)).toBe(before);
     expect(warnings(store).join()).toMatch(/range/);
   });
@@ -287,12 +291,23 @@ describe('the inspector and pitch drag follow the same rule as transposing', () 
     expect(midiNow()).toBe(41);
   });
 
-  it('still refuses taking a playable note out by drag', () => {
+  it('stops a drag at the instrument boundary', () => {
     const { target, id, midiNow } = withFirstNoteAt(55); // G3
     store = target;
     commitPitchDrag(store, id, midiToPitch(55), -1); // F3
     expect(midiNow()).toBe(55);
-    expect(warnings(store).length).toBe(1);
+    expect(warnings(store)).toEqual([]);
+  });
+
+  it('clamps a long drag to the last playable staff position', () => {
+    const track = violinTwinkle().tracks[0]!;
+    const from = midiToPitch(60);
+    const steps = boundedPitchDragSteps(track, from, -100);
+    const landed = pitchToMidi(shiftDiatonic(from, steps));
+    expect(landed).toBeGreaterThanOrEqual(trackKeyboardRange(track).min);
+    expect(pitchToMidi(shiftDiatonic(from, steps - 1))).toBeLessThan(
+      trackKeyboardRange(track).min
+    );
   });
 });
 

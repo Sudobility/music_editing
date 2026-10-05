@@ -77,6 +77,13 @@ describe('canPasteInto', () => {
       canPasteInto({ eventIds: [], measureIds: [], trackIds: ['t'] }, null)
     ).toBe(false);
   });
+
+  it('offers note paste with a cursor and no selection', () => {
+    const notes = { kind: 'notes' as const, events: [], anchorTick: 0 };
+    expect(
+      canPasteInto({ eventIds: [], measureIds: [], trackIds: [] }, notes)
+    ).toBe(true);
+  });
 });
 
 describe('a track selection', () => {

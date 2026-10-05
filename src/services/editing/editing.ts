@@ -41,11 +41,13 @@ import type {
   Ornament,
   Pitch,
   Score,
+  Track,
   UUID,
 } from '@sudobility/music_types';
 import {
   createId,
   isNoteEvent,
+  isVocalInstrumentValue,
   withGenerationVariant,
 } from '@sudobility/music_types';
 import type { MusicalEvent } from '@sudobility/music_types';
@@ -86,6 +88,8 @@ import {
   relocateNotesCommand,
   removeTempoCommand,
   shiftDiatonic,
+  trackKeyboardRange,
+  trackRangeIsBinding,
   moveNotesCommand,
   resizeNotesCommand,
   soundingPitchForTrack,
@@ -1396,7 +1400,11 @@ export function repairAllIssues<T extends EditingState>(
  */
 export function playKeyGroup<T extends EditingState>(
   store: EditorStoreApi<T>,
-  played: { midis: readonly number[]; heldMs: number | null }
+  played: {
+    midis: readonly number[];
+    heldMs: number | null;
+    toggleSelected?: boolean;
+  }
 ): void {
   const state = store.getState();
   const score = state.score;
@@ -1404,19 +1412,18 @@ export function playKeyGroup<T extends EditingState>(
 
   const chord = chordSelection(selectSelectedNotes(state));
   if (chord) {
-    // The chord's own tick, not wherever the caret happens to be, or an added
-    // note lands somewhere the player never pointed at.
-    getMusicPositionSource().moveTo(chord.startTick);
-    for (const midi of played.midis) {
-      const existing = chord.notes.find(
-        note => pitchToMidi(note.pitch) === midi
+    if (played.toggleSelected) {
+      for (const midi of played.midis)
+        toggleSelectedChordPitch(store, chord.notes[0]!, midi);
+    } else if (played.midis.length === 1 && chord.notes.length === 1) {
+      // A plain key press changes the selected note's pitch in place. Its
+      // duration and id remain the same, including when the grid differs.
+      setNotePitch(
+        store,
+        chord.notes[0]!.id,
+        midiToPitch(played.midis[0]!),
+        'concert'
       );
-      if (existing) deleteEvents(store, [existing.id]);
-      else
-        insertChordAtCaret(store, [midiToPitch(midi)], {
-          advanceCaret: false,
-          mode: 'stack',
-        });
     }
     return;
   }
@@ -1437,6 +1444,92 @@ export function playKeyGroup<T extends EditingState>(
       advanceCaret: true,
     }
   );
+}
+
+/** Shift-click a key to amend the selected chord without changing its length. */
+function toggleSelectedChordPitch<T extends EditingState>(
+  store: EditorStoreApi<T>,
+  selected: NoteEvent,
+  midi: number
+): void {
+  const state = store.getState();
+  const score = state.score;
+  if (!score || state.state === 'playing') return;
+  const track = findTrack(score, selected.trackId);
+  if (!track) return;
+  const limit = trackMaxPolyphony(track);
+  if (limit <= 1 || isVocalInstrumentValue(String(track.midiProgram))) return;
+
+  for (const measure of track.measures) {
+    for (const [voiceIndex, voice] of measure.voices.entries()) {
+      if (voice.id !== selected.voiceId) continue;
+      if (!voice.events.some(event => event.id === selected.id)) continue;
+      const chord = voice.events.filter(
+        (event): event is NoteEvent =>
+          isNoteEvent(event) &&
+          event.startTick === selected.startTick &&
+          event.durationTicks === selected.durationTicks
+      );
+      const existing = chord.find(note => pitchToMidi(note.pitch) === midi);
+      if (existing) {
+        if (chord.length <= 1) return;
+        deleteEvents(store, [existing.id]);
+        store.getState().setSelection({
+          eventIds: chord
+            .filter(note => note.id !== existing.id)
+            .map(note => note.id),
+          measureIds: [],
+          trackIds: [],
+        });
+        return;
+      }
+      if (chordSizeAt(score, track.id, selected.startTick) >= limit) {
+        state.pushToast({
+          severity: 'warning',
+          message: editingCopy().tooManyNotes({
+            instrument: track.instrumentName ?? null,
+            limit,
+            refused: 'addChord',
+          }),
+        });
+        return;
+      }
+      const pitch = midiToPitch(midi);
+      if (refuseOutOfRange(store, track, [pitch], 'addChord')) return;
+      const before = new Set(chord.map(note => note.id));
+      dispatchTracked(
+        store,
+        addNoteCommand(
+          {
+            trackId: track.id,
+            measureId: measure.id,
+            voiceIndex,
+            pitch,
+            startTick: selected.startTick,
+            durationTicks: selected.durationTicks,
+          },
+          commandLabel('addNote')
+        )
+      );
+      const added = allNotes(store.getState().score!).filter(
+        note =>
+          note.trackId === track.id &&
+          note.voiceId === voice.id &&
+          note.startTick === selected.startTick &&
+          note.durationTicks === selected.durationTicks &&
+          !before.has(note.id)
+      );
+      store.getState().setSelection({
+        eventIds: [
+          ...chord.map(note => note.id),
+          ...added.map(note => note.id),
+        ],
+        measureIds: [],
+        trackIds: [],
+      });
+      return;
+    }
+  }
 }
 
 // ---- clicking the sheet ------------------------------------------------------
@@ -2066,18 +2159,54 @@ export function relocateNotes<T extends EditingState>(
  * Movement is diatonic, by staff positions rather than semitones, so the note
  * follows the pointer across E-F and B-C.
  */
+export function boundedPitchDragSteps(
+  track: Track | null,
+  from: Pitch,
+  steps: number
+): number {
+  if (!track || !trackRangeIsBinding(track) || steps === 0) return steps;
+  const range = trackKeyboardRange(track);
+  const direction = Math.sign(steps);
+  const count = Math.abs(Math.trunc(steps));
+  if (count === 0) return 0;
+  const fromMidi = pitchToMidi(from);
+  if (direction > 0 && fromMidi > range.max) return 0;
+  if (direction < 0 && fromMidi < range.min) return 0;
+
+  // Diatonic shifts are monotonic in sounding pitch. Find the last staff
+  // position within the compass, even when the pointer moves far past it.
+  const withinEdge = (distance: number) => {
+    const midi = pitchToMidi(shiftDiatonic(from, direction * distance));
+    return direction > 0 ? midi <= range.max : midi >= range.min;
+  };
+  if (withinEdge(count)) return direction * count;
+  let low = 0;
+  let high = count;
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (withinEdge(middle)) low = middle;
+    else high = middle;
+  }
+  return direction * low;
+}
+
 export function commitPitchDrag<T extends EditingState>(
   store: EditorStoreApi<T>,
   noteId: UUID,
   from: Pitch,
   steps: number
 ): void {
-  if (steps === 0) return;
   const score = store.getState().score;
-  const dragged = shiftDiatonic(from, steps);
-  // `from` is the note's stored pitch, so `dragged` is already sounding. The
-  // drag is refused whole rather than stopped at the edge: a drag that stuck at
-  // the top of the compass would read as the pointer being ignored.
+  const note = score ? findEvent(score, noteId) : null;
+  if (!note || !isNoteEvent(note)) return;
+  const bounded = boundedPitchDragSteps(
+    findTrack(score!, note.trackId),
+    from,
+    steps
+  );
+  if (bounded === 0) return;
+  const dragged = shiftDiatonic(from, bounded);
+  // Keep the command's range check as a guard against stale or imported data.
   if (
     score &&
     refuseOutOfRangeChanges(
@@ -2425,15 +2554,15 @@ export function pasteWouldPrompt<T extends EditingState>(
   const score = state.score;
   const clipboard = state.clipboard;
   if (!score || !clipboard) return false;
-  if (selectionKind(state.selection) !== clipboard.kind) return false;
-  if (clipboard.kind === 'measures' || clipboard.kind === 'track') return true;
+  if (clipboard.kind === 'measures' || clipboard.kind === 'track')
+    return selectionKind(state.selection) === clipboard.kind;
   if (clipboard.events.length === 0) return false;
-  const trackId = selectActiveTrackId(state);
+  const trackId = state.selection.trackIds[0] ?? selectActiveTrackId(state);
   if (!trackId) return false;
   return pasteNeedsPrompt(
     score,
     trackId,
-    clipboard.anchorTick,
+    getMusicPositionSource().reportedTick,
     clipboardSpan(clipboard.events)
   );
 }
