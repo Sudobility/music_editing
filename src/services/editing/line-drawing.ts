@@ -37,7 +37,7 @@ export function reviseLine(
   return [...kept, next];
 }
 
-/** One note per uninterrupted pitch run; time resolution is a thirty-second note. */
+/** Preserve pitch changes at thirty-second-note resolution, then round lengths. */
 export function lineNotes(
   samples: readonly LineSample[],
   score: Score,
@@ -83,32 +83,64 @@ export function lineNotes(
         pitch,
       });
   }
-  return result;
+  const eighth = ticksFor('eighth', score.ppq);
+  const trackEndTick = trackEnd!.startTick + trackEnd!.durationTicks;
+  let cursor = Math.max(
+    0,
+    Math.min(trackEndTick - eighth, Math.round(first / eighth) * eighth)
+  );
+  return result.flatMap(run => {
+    if (cursor >= trackEndTick) return [];
+    const bar =
+      track.measures.find(
+        measure =>
+          cursor >= measure.startTick &&
+          cursor < measure.startTick + measure.durationTicks
+      )?.durationTicks ?? ticksFor('whole', score.ppq);
+    const lengths = [
+      ...new Set([
+        eighth,
+        ticksFor('quarter', score.ppq),
+        ticksFor('half', score.ppq),
+        bar,
+      ]),
+    ]
+      .filter(length => length > 0 && length <= bar)
+      .sort((a, b) => a - b);
+    const rawLength = run.endTick - run.startTick;
+    const fullBars = Math.floor(rawLength / bar);
+    const remainder = rawLength - fullBars * bar;
+    const nearest =
+      remainder > 0
+        ? lengths.reduce((best, length) =>
+            Math.abs(length - remainder) < Math.abs(best - remainder)
+              ? length
+              : best
+          )
+        : 0;
+    const duration = Math.max(eighth, fullBars * bar + nearest);
+    const note = {
+      startTick: cursor,
+      endTick: Math.min(trackEndTick, cursor + duration),
+      pitch: run.pitch,
+    };
+    cursor = note.endTick;
+    return note.endTick > note.startTick ? [note] : [];
+  });
 }
 
-/** Prefer one conventional value, then a short tied chain for longer runs. */
-function rhythmicPieces(length: number, ppq: number): number[] {
-  const names = [
-    'dotted-whole',
-    'whole',
-    'dotted-half',
-    'half',
-    'dotted-quarter',
-    'quarter',
-    'dotted-eighth',
-    'eighth',
-    'dotted-sixteenth',
-    'sixteenth',
-    'dotted-thirtysecond',
-    'thirtysecond',
-    'triplet-quarter',
-    'triplet-eighth',
-    'triplet-sixteenth',
-    'triplet-thirtysecond',
-  ] as const;
-  const values = [...new Set(names.map(name => ticksFor(name, ppq)))].filter(
-    v => v > 0
-  );
+/** Use only an eighth, quarter, half, or full bar for each drawn note. */
+function rhythmicPieces(
+  length: number,
+  ppq: number,
+  barLength: number
+): number[] {
+  const values = [
+    barLength,
+    ticksFor('half', ppq),
+    ticksFor('quarter', ppq),
+    ticksFor('eighth', ppq),
+  ].filter((value, index, all) => value > 0 && all.indexOf(value) === index);
   const best: Array<number[] | null> = Array(length + 1).fill(null);
   best[0] = [];
   for (let total = 1; total <= length; total++) {
@@ -191,7 +223,12 @@ export function drawLineCommand(
         let cursor = sections[index]!;
         for (const duration of rhythmicPieces(
           sections[index + 1]! - cursor,
-          score.ppq
+          score.ppq,
+          edited.measures.find(
+            measure =>
+              cursor >= measure.startTick &&
+              cursor < measure.startTick + measure.durationTicks
+          )?.durationTicks ?? 0
         )) {
           pieces.push({ start: cursor, duration });
           cursor += duration;

@@ -61,13 +61,40 @@ describe('line drawing', () => {
       track
     );
     expect(notes.map(note => [note.startTick, note.endTick])).toEqual([
-      [0, 120],
-      [120, 240],
-      [240, 300],
+      [0, 240],
+      [240, 480],
+      [480, 720],
     ]);
     expect(pitchToMidi(notes[2]!.pitch)).toBeLessThan(
       pitchToMidi(pitch('C', 9))
     );
+  });
+
+  it('rounds drawn pitch runs to eighth, quarter, half, or bar durations', () => {
+    const score = twinkleScore();
+    const track = score.tracks[0]!;
+    const bar = track.measures[0]!.durationTicks;
+    const boundaries = [150, 570, 1360, 3110];
+    const pitches = [pitch('C'), pitch('D'), pitch('E'), pitch('F')];
+    const samples = Array.from({ length: 105 }, (_, index) => {
+      const tick = index * 30;
+      const pitchIndex = boundaries.findIndex(boundary => tick < boundary);
+      return sample(tick, pitches[pitchIndex < 0 ? 3 : pitchIndex]!);
+    });
+    const notes = lineNotes(samples, score, track);
+    expect(notes.map(note => note.pitch.step)).toEqual(['C', 'D', 'E', 'F']);
+    expect(notes.map(note => note.endTick - note.startTick)).toEqual([
+      score.ppq / 2,
+      score.ppq,
+      score.ppq * 2,
+      bar,
+    ]);
+    expect(
+      notes.every(
+        (note, index) =>
+          index === 0 || note.startTick === notes[index - 1]!.endTick
+      )
+    ).toBe(true);
   });
 
   it('replaces just the drawn span, ties across a barline, and undoes as one command', () => {
