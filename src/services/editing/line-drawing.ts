@@ -5,10 +5,8 @@ import {
   insertNoteIntoTrack,
   isNoteEvent,
   pitchToMidi,
-  midiToPitch,
   reflowVoice,
   ticksFor,
-  trackKeyboardRange,
   transformCommand,
   withTracks,
 } from '@sudobility/music_types';
@@ -55,7 +53,6 @@ export function lineNotes(
   );
   if (end <= first) return [];
 
-  const playable = trackKeyboardRange(track);
   const result: LineNote[] = [];
   let sampleIndex = 0;
   for (let tick = first; tick < end; tick += quantum) {
@@ -67,12 +64,8 @@ export function lineNotes(
     ) {
       sampleIndex++;
     }
-    const raw = samples[sampleIndex]!.pitch;
-    const midi = Math.max(
-      playable.min,
-      Math.min(playable.max, pitchToMidi(raw))
-    );
-    const pitch = midi === pitchToMidi(raw) ? raw : midiToPitch(midi);
+    const pitch = samples[sampleIndex]!.pitch;
+    const midi = pitchToMidi(pitch);
     const previous = result.at(-1);
     if (previous && pitchToMidi(previous.pitch) === midi)
       previous.endTick = Math.min(end, tick + quantum);
@@ -85,17 +78,21 @@ export function lineNotes(
   }
   const eighth = ticksFor('eighth', score.ppq);
   const trackEndTick = trackEnd!.startTick + trackEnd!.durationTicks;
-  let cursor = Math.max(
+  const cursor = Math.max(
     0,
-    Math.min(trackEndTick - eighth, Math.round(first / eighth) * eighth)
+    Math.min(trackEndTick, Math.round(first / eighth) * eighth)
   );
-  return result.flatMap(run => {
-    if (cursor >= trackEndTick) return [];
+  const targetEnd = Math.min(
+    trackEndTick,
+    cursor + Math.max(eighth, end - first)
+  );
+  const targetLength = targetEnd - cursor;
+  const durationFor = (run: LineNote): number => {
     const bar =
       track.measures.find(
         measure =>
-          cursor >= measure.startTick &&
-          cursor < measure.startTick + measure.durationTicks
+          run.startTick >= measure.startTick &&
+          run.startTick < measure.startTick + measure.durationTicks
       )?.durationTicks ?? ticksFor('whole', score.ppq);
     const lengths = [
       ...new Set([
@@ -119,12 +116,64 @@ export function lineNotes(
           )
         : 0;
     const duration = Math.max(eighth, fullBars * bar + nearest);
+    return duration;
+  };
+  const runs = result.map(run => ({ ...run, duration: durationFor(run) }));
+  const totalDuration = () => runs.reduce((sum, run) => sum + run.duration, 0);
+  // Quantising each tiny pitch wobble up to an eighth can otherwise make a
+  // one-bar stroke several bars long. Merge the shortest run into its closest
+  // neighbour until the notes fit the time the pointer actually covered.
+  while (runs.length > 1 && totalDuration() > targetLength) {
+    const shortest = runs.reduce(
+      (best, run, index) =>
+        run.endTick - run.startTick <
+        runs[best]!.endTick - runs[best]!.startTick
+          ? index
+          : best,
+      0
+    );
+    const neighbour =
+      shortest === 0
+        ? 1
+        : shortest === runs.length - 1
+          ? shortest - 1
+          : Math.abs(
+                pitchToMidi(runs[shortest - 1]!.pitch) -
+                  pitchToMidi(runs[shortest]!.pitch)
+              ) <=
+              Math.abs(
+                pitchToMidi(runs[shortest + 1]!.pitch) -
+                  pitchToMidi(runs[shortest]!.pitch)
+              )
+            ? shortest - 1
+            : shortest + 1;
+    const left = Math.min(shortest, neighbour);
+    const right = Math.max(shortest, neighbour);
+    const chosenPitch =
+      runs[shortest]!.endTick - runs[shortest]!.startTick >=
+      runs[neighbour]!.endTick - runs[neighbour]!.startTick
+        ? runs[shortest]!.pitch
+        : runs[neighbour]!.pitch;
+    const merged: LineNote = {
+      startTick: runs[left]!.startTick,
+      endTick: runs[right]!.endTick,
+      pitch: chosenPitch,
+    };
+    runs.splice(left, 2, { ...merged, duration: durationFor(merged) });
+  }
+  if (runs.length === 0 || targetLength <= 0) return [];
+  const total = totalDuration();
+  if (total < targetLength)
+    runs[runs.length - 1]!.duration += targetLength - total;
+  let at = cursor;
+  return runs.flatMap(run => {
+    if (at >= targetEnd) return [];
     const note = {
-      startTick: cursor,
-      endTick: Math.min(trackEndTick, cursor + duration),
+      startTick: at,
+      endTick: Math.min(targetEnd, at + run.duration),
       pitch: run.pitch,
     };
-    cursor = note.endTick;
+    at = note.endTick;
     return note.endTick > note.startTick ? [note] : [];
   });
 }

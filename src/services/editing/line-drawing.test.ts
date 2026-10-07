@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allNotes, pitchToMidi, validateScore } from '@sudobility/music_types';
+import { allNotes, ticksFor, validateScore } from '@sudobility/music_types';
 import { twinkleScore } from '@sudobility/music_types/test';
 import type { Pitch } from '@sudobility/music_types';
 import {
@@ -45,38 +45,48 @@ describe('line drawing', () => {
     ).toEqual([0, 100]);
   });
 
-  it('makes one note per pitch run with durations from horizontal distance and clamps range', () => {
+  it('keeps the drawn pitch on Acoustic Bass instead of clamping it down to its range', () => {
     const score = twinkleScore();
-    const track = score.tracks[0]!;
+    const track = { ...score.tracks[0]!, midiProgram: 32 };
     const notes = lineNotes(
-      [
-        sample(0, pitch('C')),
-        sample(60, pitch('C')),
-        sample(120, pitch('E')),
-        sample(180, pitch('E')),
-        sample(240, pitch('C', 9)),
-        sample(300, pitch('C', 9)),
-      ],
+      [sample(0, pitch('C', 9)), sample(240, pitch('C', 9))],
       score,
       track
     );
     expect(notes.map(note => [note.startTick, note.endTick])).toEqual([
       [0, 240],
-      [240, 480],
-      [480, 720],
     ]);
-    expect(pitchToMidi(notes[2]!.pitch)).toBeLessThan(
-      pitchToMidi(pitch('C', 9))
+    expect(notes[0]!.pitch).toEqual(pitch('C', 9));
+  });
+
+  it('drops excess tone changes so a one-bar stroke still lasts one bar', () => {
+    const score = twinkleScore();
+    const track = score.tracks[0]!;
+    const bar = track.measures[0]!.durationTicks;
+    const samples = Array.from({ length: 33 }, (_, index) =>
+      sample(index * (bar / 32), pitch('C', 2 + index))
     );
+    const notes = lineNotes(samples, score, track);
+    expect(notes.length).toBeLessThanOrEqual(
+      bar / ticksFor('eighth', score.ppq)
+    );
+    expect(notes[0]!.startTick).toBe(0);
+    expect(notes.at(-1)!.endTick).toBe(bar);
+    expect(
+      notes.every(
+        (note, index) =>
+          index === 0 || note.startTick === notes[index - 1]!.endTick
+      )
+    ).toBe(true);
   });
 
   it('rounds drawn pitch runs to eighth, quarter, half, or bar durations', () => {
     const score = twinkleScore();
     const track = score.tracks[0]!;
     const bar = track.measures[0]!.durationTicks;
-    const boundaries = [150, 570, 1360, 3110];
+    const boundaries = [240, 720, 1680];
     const pitches = [pitch('C'), pitch('D'), pitch('E'), pitch('F')];
-    const samples = Array.from({ length: 105 }, (_, index) => {
+    const samples = Array.from({ length: 121 }, (_, index) => {
       const tick = index * 30;
       const pitchIndex = boundaries.findIndex(boundary => tick < boundary);
       return sample(tick, pitches[pitchIndex < 0 ? 3 : pitchIndex]!);

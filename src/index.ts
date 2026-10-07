@@ -23,6 +23,8 @@ export * from './store/slices/ui-slice.js';
 export * from './store/slices/unplugged-slice.js';
 export * from './services/editing/editing.js';
 export * from './services/editing/line-drawing.js';
+export * from './services/editing/transcribed-voice.js';
+export * from './services/editing/transcribed-score.js';
 export * from './services/editing/key-group.js';
 export * from './services/editing/shortcuts.js';
 export * from './services/editing/copy.js';
