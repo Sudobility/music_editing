@@ -55,7 +55,12 @@ import type { ScoreSelection } from '@sudobility/music_types';
 import type { ScoreCommand } from '@sudobility/music_types';
 import type { ValidationIssue } from '@sudobility/music_types';
 import { allNotes, findEvent, findTrack } from '@sudobility/music_types';
-import { setLyricCommand, syllabicFor } from '@sudobility/music_types';
+import {
+  alignLyricsToTrack,
+  setLyricCommand,
+  syllabicFor,
+} from '@sudobility/music_types';
+import type { Lyric } from '@sudobility/music_types';
 import {
   changeBarlineCommand,
   changeMeasureClefCommand,
@@ -1818,6 +1823,42 @@ export function writeLyric<T extends EditingState>(
     )
   );
   return at.hyphenated;
+}
+
+/**
+ * Lay a whole line of words onto a track's melody at once.
+ *
+ * The bulk counterpart to `writeLyric`: where that sets one syllable, this takes
+ * the syllables of a line — already split, see music_types' `syllabifyText` —
+ * and distributes them across the track's notes through `alignLyricsToTrack`, a
+ * word that outlasts its note held across the next as a melisma. One undoable
+ * edit, labelled like any other lyric change (there is no separate label key: a
+ * distribute *is* setting lyrics, and the undo entry reads the same).
+ *
+ * Returns how many syllables landed and any that did not fit, so a caller can
+ * tell the reader a line ran longer than its tune.
+ */
+export function distributeLyrics<T extends EditingState>(
+  store: EditorStoreApi<T>,
+  trackId: UUID,
+  syllables: readonly Lyric[]
+): { applied: number; leftover: Lyric[] } {
+  const before = store.getState().score;
+  if (!before) return { applied: 0, leftover: [...syllables] };
+  const result = alignLyricsToTrack(before, trackId, syllables);
+  // A whole-score replace: `execute` runs the alignment on whatever score it is
+  // handed (the current one at dispatch, and again on redo), and `undo` restores
+  // the score as it was before — the same shape as any replace-style command.
+  const command: ScoreCommand = {
+    id: createId(),
+    label: commandLabel('setLyric'),
+    timestamp: Date.now(),
+    kind: 'content',
+    execute: score => alignLyricsToTrack(score, trackId, syllables).score,
+    undo: () => before,
+  };
+  dispatchTracked(store, command);
+  return { applied: result.applied, leftover: result.leftover };
 }
 
 // ---- the inspector -----------------------------------------------------------
