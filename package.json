@@ -1,6 +1,6 @@
 {
   "name": "@sudobility/music_editing",
-  "version": "0.0.50",
+  "version": "0.0.51",
   "description": "The Moosiac editing engine: an editing store and every operation that changes a score. Composable, so one document is one store.",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,14 +30,14 @@
     "prepublishOnly": "bun run clean && bun run verify"
   },
   "peerDependencies": {
-    "@sudobility/music_types": "^0.13.53",
+    "@sudobility/music_types": "^0.13.54",
     "immer": "^11.1.18",
     "react": ">=18",
     "zustand": ">=5"
   },
   "devDependencies": {
     "@eslint/js": "^9.38.0",
-    "@sudobility/music_types": "^0.13.53",
+    "@sudobility/music_types": "^0.13.54",
     "@types/react": "^19.2.18",
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",

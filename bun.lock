@@ -6,7 +6,7 @@
       "name": "@sudobility/music_editing",
       "devDependencies": {
         "@eslint/js": "^9.38.0",
-        "@sudobility/music_types": "^0.13.52",
+        "@sudobility/music_types": "^0.13.54",
         "@types/react": "^19.2.18",
         "@typescript-eslint/eslint-plugin": "^8.46.2",
         "@typescript-eslint/parser": "^8.46.2",
@@ -23,7 +23,7 @@
         "zustand": "^5.0.15",
       },
       "peerDependencies": {
-        "@sudobility/music_types": "^0.13.52",
+        "@sudobility/music_types": "^0.13.54",
         "immer": "^11.1.18",
         "react": ">=18",
         "zustand": ">=5",
@@ -99,9 +99,9 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
-    "@sudobility/music_types": ["@sudobility/music_types@0.13.52", "", { "peerDependencies": { "@sudobility/types": "^1.9.68", "immer": "^10.0.0 || ^11.0.0", "zod": "^4.0.0" } }, "sha512-Ti4+1yrOFEz0w5zl/unkvS5f9ZfIATQSmnRz02nIvlRPBM+qUXSJwYr5Oc+4ts9FDLQ5c6TaXuUhO8gHBHojYQ=="],
+    "@sudobility/music_types": ["@sudobility/music_types@0.13.54", "https://npm.pkg.github.com/download/@sudobility/music_types/0.13.54/d973139b505fd1a66d06ddbfc5936616b099b2b3", { "peerDependencies": { "@sudobility/types": "^1.9.74", "immer": "^10.0.0 || ^11.0.0", "zod": "^4.0.0" } }, "sha512-ugUh0IpygmraA9ImFDkdUFsR24SdyeE1QLbviunak0AOlFMCDg7Soo6Za8oEm0KpNZRZrjeO8KVACPNBQq6Bzg=="],
 
-    "@sudobility/types": ["@sudobility/types@1.9.66", "", {}, "sha512-eD61iT72sB5+1zJJtM81+eB0YmqEQ0dc/qno0Sw3GYJHcpkbgwN6LYEmiyJzlqtcN9sG5nWuexH9NnBvLODrtw=="],
+    "@sudobility/types": ["@sudobility/types@1.9.74", "https://npm.pkg.github.com/download/@sudobility/types/1.9.74/f9ad864ba5d8d1097e7e48378ebee8aa7e129e88", {}, "sha512-jgt0F1r71qjFNiRNn/1YlL4JU65sjnzYd8Sfi+Y9z62Lu9VhIXeqWAH12u7/hmGPZqG3nxzn0V+s3sFkB1qWuQ=="],
 
     "@types/chai": ["@types/chai@5.2.3", "", { "dependencies": { "@types/deep-eql": "*", "assertion-error": "^2.0.1" } }, "sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA=="],
 
