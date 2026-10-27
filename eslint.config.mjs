@@ -27,6 +27,7 @@ export default [
     },
     rules: {
       'preserve-caught-error': 'off',
+      'no-useless-assignment': 'off',
       ...typescript.configs.recommended.rules,
       // Formatting is prettier's job; `prettierConfig` switches off the lint
       // rules that would argue with it. Same wiring as `sudojo_lib`.
