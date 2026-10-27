@@ -1,6 +1,6 @@
 {
   "name": "@sudobility/music_editing",
-  "version": "0.0.59",
+  "version": "0.0.60",
   "description": "The Moosiac editing engine: an editing store and every operation that changes a score. Composable, so one document is one store.",
   "type": "module",
   "main": "./dist/index.js",
