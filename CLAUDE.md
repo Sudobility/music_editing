@@ -30,7 +30,9 @@ global state cannot give.
 ## Commands
 
 - `bun run verify` — format check, typecheck, lint, test, build (before any push)
-- `bun run test` / `test:watch` — vitest
+- `bun run test:unit` / `test:watch` — vitest (node env; ~440 tests). There is
+  no `test` script — `bun run test` falls through to `/bin/test` and fails.
+- `bun run build` — `tsc -p tsconfig.esm.json` → `dist/` (ESM + d.ts only)
 
 ## Boundaries, enforced
 
