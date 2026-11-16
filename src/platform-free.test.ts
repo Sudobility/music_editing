@@ -147,7 +147,13 @@ describe('platform independence', () => {
     // react and zustand both run natively; a renderer or a DOM shim would not.
     for (const name of runtime) {
       expect(
-        ['immer', 'zustand', 'react', '@sudobility/music_types'],
+        [
+          'immer',
+          'zustand',
+          'react',
+          '@sudobility/music_types',
+          '@sudobility/types',
+        ],
         `${name} is not known to work on React Native`
       ).toContain(name);
     }
