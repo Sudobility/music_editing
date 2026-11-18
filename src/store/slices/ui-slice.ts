@@ -19,6 +19,7 @@ import type {
   ToastAction,
   ToastSeverity,
   Toast,
+  UnpluggedListener,
   UUID,
 } from '@sudobility/music_types';
 import type { EditingState, SliceArgs } from '../editing-store.js';
@@ -115,6 +116,19 @@ export type UiSlice = {
    */
   unpluggedActive: boolean;
 
+  /**
+   * A listener position being *previewed* live without being written to the
+   * score — what the Spatial stage's auto-moving ("Wander") mode sets as it
+   * walks. A playback binding reads it and mixes from it (the same live
+   * `applyMix` a drag triggers), but nothing is dispatched, so it never
+   * enters undo history or the saved `Score.unplugged` arrangement. `null`
+   * means nothing is being previewed — the committed arrangement is heard.
+   *
+   * Ephemeral, like `unpluggedActive` above: not persisted, resets to `null`
+   * on load. It only takes effect for playback while `unpluggedActive`.
+   */
+  unpluggedListenerPreview: UnpluggedListener | null;
+
   setActiveTrack: (trackId: UUID | null) => void;
   setNoteInput: (on: boolean) => void;
 
@@ -135,6 +149,8 @@ export type UiSlice = {
   setEditMode: (mode: EditMode) => void;
   setActiveVoice: (voiceIndex: number) => void;
   setUnpluggedActive: (active: boolean) => void;
+  /** Sets (or clears, with `null`) the previewed-but-unsaved listener position. */
+  setUnpluggedListenerPreview: (listener: UnpluggedListener | null) => void;
   openDialog: (id: string) => void;
   closeDialog: (id: string) => void;
   toggleDialog: (id: string) => void;
@@ -162,6 +178,7 @@ export const createUiSlice = <T extends EditingState>({
   dialogs: {},
   toasts: [],
   unpluggedActive: false,
+  unpluggedListenerPreview: null,
 
   setNoteInput: on => {
     set(state => {
@@ -230,6 +247,11 @@ export const createUiSlice = <T extends EditingState>({
   setUnpluggedActive: active => {
     set(state => {
       state.unpluggedActive = active;
+    });
+  },
+  setUnpluggedListenerPreview: listener => {
+    set(state => {
+      state.unpluggedListenerPreview = listener;
     });
   },
   openDialog: id => {
